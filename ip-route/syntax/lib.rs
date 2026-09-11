@@ -27,7 +27,7 @@ pub const ANY: Map = Map::Val(Val {
     flags: &[],
 });
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Map {
     /// All inner maps must match in order.
     All(&'static [Self]),
@@ -63,7 +63,7 @@ pub enum Map {
 /// - Arguments: `"{}", local`
 /// - Formatted values: `"{}[-{}][/{}]"` (a tuple with possible None fields)
 /// - Conditional: `"{:option}"` the following code is only ran on Some(_)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Val {
     /// Variable name
     pub name: &'static str,
@@ -76,6 +76,16 @@ pub struct Val {
     /// - `"hex"` - always interpret value as hexadecimal, even without "0x" prefix
     /// - `"format:{}[/{}]"` - a tuple with possible optional values in `"[]"`
     pub flags: &'static [&'static str],
+}
+
+impl Val {
+    pub const fn new(name: &'static str, ty: &'static str) -> Self {
+        Self {
+            name,
+            ty,
+            flags: &[],
+        }
+    }
 }
 
 pub const fn lit(lit: &'static str) -> Map {
