@@ -65,6 +65,9 @@ macro_rules! group {
                     ( $lit1:literal $(| $lits:literal)* )
                 )?
                 $(
+                    [ $($expr_all:expr),* ]
+                )?
+                $(
                     $ident:ident : $ty:ty
                         $( as $( $ident_flags:literal )* )?
                 )?
@@ -89,6 +92,11 @@ macro_rules! group {
                                 $crate::Map::Any(&[
                                     $crate::Map::Lit($lit1),
                                     $( $crate::Map::Lit($lits), )*
+                                ]),
+                            )?
+                            $(
+                                $crate::Map::All(&[
+                                    $($expr_all,)*
                                 ]),
                             )?
                             $(
