@@ -146,3 +146,12 @@ if test -n "$err"; then
   echo -ne "\e[0;31m$err\e[0m"
   exit 1
 fi
+
+# Test MSRV
+rustup run 1.85.0 cargo check --all-features \
+  -p netlink-bindings \
+  -p netlink-socket2 \
+  -p strip-async
+rustup run 1.89.0 cargo check --all-features \
+  -p ip-route \
+  -p reverse-lookup

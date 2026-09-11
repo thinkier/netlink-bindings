@@ -958,9 +958,8 @@ fn parse_subt(v: &ValSubt, flags: &[&str], s: &mut State<'_>) -> Result<String, 
                     Err(err) => bail_static!("Can't parse {tok:?} as {ty}: {err}"),
                 }
             }
-            _ if is_num(ty)
-                && let Some(tok) = tok.strip_prefix("0x") =>
-            {
+            _ if is_num(ty) && tok.starts_with("0x") => {
+                let tok = tok.strip_prefix("0x").unwrap();
                 match u64::from_str_radix(tok, 16) {
                     Ok(n) => format!("{n}"),
                     Err(err) => bail_static!("Can't parse {tok:?} as {ty}: {err}"),
