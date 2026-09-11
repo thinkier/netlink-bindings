@@ -122,7 +122,7 @@ pub struct State<'a> {
     pub shared: Rc<RefCell<SharedState>>,
     pub closing_len: usize,
     pub out_len: usize,
-    pub argc: usize,
+    pub args_len: usize,
     pub iter: Iter<'a>,
 }
 
@@ -133,6 +133,7 @@ pub struct SharedState {
     pub closing_level: Rc<()>,
     pub out: String,
     pub closing: Vec<usize>,
+    pub args: Vec<Option<String>>,
     pub tried_literals: HashMap<Pos, HashSet<String>>,
     pub max_ptr_pos: Pos,
     pub errs: Vec<Hint>,
@@ -171,6 +172,21 @@ impl Pos {
 }
 
 impl<'a> State<'a> {
+    fn args_get(&mut self) -> Vec<Option<String>> {
+        let mut shared = self.shared.borrow_mut();
+        shared.args.truncate(self.args_len);
+        shared.args.clone()
+    }
+
+    fn args_push(&mut self, name: Option<String>) -> String {
+        let mut shared = self.shared.borrow_mut();
+        shared.args.truncate(self.args_len);
+        let i = shared.args.len();
+        shared.args.push(name);
+        self.args_len = shared.args.len();
+        format!("__arg{i}")
+    }
+
     fn closing_push(&mut self) {
         let mut shared = self.shared.borrow_mut();
         shared.closing.truncate(self.closing_len);
@@ -248,7 +264,7 @@ impl Error {
 
 pub struct Parsed {
     pub stream: String,
-    pub argc: usize,
+    pub args: Vec<Option<String>>,
 }
 
 fn parse_expr(s: &mut State<'_>, map: &Map, dont_error: bool) -> bool {
@@ -332,9 +348,9 @@ pub fn parse(val: &str) -> Parsed {
     let iter = tokens.iter().cloned().peekable();
     let mut s = State {
         shared: Default::default(),
+        args_len: 0,
         closing_len: 0,
         out_len: 0,
-        argc: 0,
         iter: iter.clone(),
     };
 
@@ -376,7 +392,7 @@ pub fn parse(val: &str) -> Parsed {
 
     Parsed {
         stream,
-        argc: s.argc,
+        args: s.args_get(),
     }
 }
 
@@ -422,6 +438,7 @@ pub fn parse_cond(s: &mut State, map: &Map) -> bool {
 
         let _level = s.shared.borrow().closing_level.clone();
 
+        let cond = new_s.args_push(Some(cond.to_string()));
         writeln!(new_s, "if {cond} {{").unwrap();
         let mut is_ok = parse_expr(&mut new_s, map, true);
         new_s.closing_flush();
@@ -987,12 +1004,11 @@ fn parse_subt(v: &ValSubt, flags: &[&str], s: &mut State<'_>) -> Result<String, 
     } else {
         let (tok, flag) = tok.split_once(":").unwrap_or((tok, ""));
 
-        let mut tok = format!("{tok}");
-        if tok.is_empty() {
-            let i = s.argc;
-            s.argc += 1;
-            tok = format!("arg{i}");
-        }
+        let tok = s.args_push(if tok.is_empty() {
+            None
+        } else {
+            Some(format!("{tok}"))
+        });
 
         match flag {
             "" => {}
@@ -1109,9 +1125,9 @@ mod tests {
         let toks = [];
         let s = &mut State {
             shared: Default::default(),
+            args_len: Default::default(),
             closing_len: Default::default(),
             out_len: Default::default(),
-            argc: Default::default(),
             iter: toks.iter().cloned().peekable(),
         };
 
@@ -1119,10 +1135,10 @@ mod tests {
         let mut n = || dbg!(parse_subt(iter.next().unwrap(), flags, s).unwrap());
 
         assert_eq!(n(), "10");
-        assert_eq!(n(), "a");
+        assert_eq!(n(), "__arg0");
         assert_eq!(n(), "IpAddr::V4(Ipv4Addr::from_octets([1, 2, 0, 0]))");
-        assert_eq!(n(), "b");
-        assert_eq!(n(), "Some(arg0)");
+        assert_eq!(n(), "__arg1");
+        assert_eq!(n(), "Some(__arg2)");
         assert_eq!(n(), "Some(IpAddr::V4(Ipv4Addr::from_octets([4, 0, 0, 0])))");
         assert_eq!(n(), "None");
 
@@ -1233,9 +1249,9 @@ mod tests {
         let flags = &[][..];
         let s = &mut State {
             shared: Default::default(),
+            args_len: Default::default(),
             closing_len: Default::default(),
             out_len: Default::default(),
-            argc: Default::default(),
             iter: toks.iter().cloned().peekable(),
         };
 
@@ -1291,9 +1307,9 @@ mod tests {
         let flags = &[][..];
         let s = &mut State {
             shared: Default::default(),
+            args_len: Default::default(),
             closing_len: Default::default(),
             out_len: Default::default(),
-            argc: Default::default(),
             iter: toks.iter().cloned().peekable(),
         };
 

@@ -69,17 +69,36 @@ fn ip_inner(input: TokenStream, is_dump: bool) -> TokenStream {
     toks = prelude;
 
     let mut args = proc_macro2::TokenStream::new();
-    for (i, e) in input.args.iter().enumerate() {
-        let span = e.span();
-        let arg: Ident = syn::parse_str(&format!("arg{i}")).unwrap();
-        args.extend(quote::quote_spanned! {span=>
-            let #arg = #e;
-        });
+    let mut argc = 0;
+    let mut argc_missed = 0;
+    for (i, name) in res.args.iter().enumerate() {
+        let arg: Ident = syn::parse_str(&format!("__arg{i}")).unwrap();
+        if let Some(name) = name {
+            let name: Expr = syn::parse_str(name).expect("Malformed ident");
+            args.extend(quote! {
+                let #arg = (#name);
+            });
+        } else if argc < input.args.len() {
+            let expr = &input.args[argc];
+            argc += 1;
+            args.extend(quote! {
+                let #arg = (#expr);
+            });
+        } else {
+            argc_missed += 1;
+            args.extend(quote! {
+                let #arg = panic!();
+            });
+        }
     }
 
     let mut errs = proc_macro2::TokenStream::new();
-    if res.argc < input.args.len() {
-        errs.extend(err_unused_args(&input, res.argc));
+    if argc_missed != 0 {
+        errs.extend(err_more_args(&input, argc + argc_missed));
+    }
+
+    if argc < input.args.len() {
+        errs.extend(err_unused_args(&input, argc));
     }
 
     if input.sock.is_some() && !is_dump && command.is_dump() {
@@ -148,6 +167,24 @@ fn err_codegen(res: &str, err: syn::Error) -> proc_macro2::TokenStream {
     syn::Error::new(Span::call_site(), err).into_compile_error()
 }
 
+fn err_more_args(input: &FmtArgs, expected: usize) -> proc_macro2::TokenStream {
+    let mut err = syn::Error::new(
+        Span::call_site(),
+        &format!("expected more arguments to format!()-like macro"),
+    );
+
+    err.combine(syn::Error::new(
+        input.fmt.span(),
+        &format!(
+            "this command contains {} unnamed substitutions \"{{}}\", while only {} arguments were provided",
+            expected,
+            input.args.len(),
+        ),
+    ));
+
+    err.into_compile_error()
+}
+
 fn err_unused_args(input: &FmtArgs, expected: usize) -> proc_macro2::TokenStream {
     let mut err = syn::Error::new(
         input.args[expected].span(),
@@ -157,7 +194,7 @@ fn err_unused_args(input: &FmtArgs, expected: usize) -> proc_macro2::TokenStream
     err.combine(syn::Error::new(
         input.fmt.span(),
         &format!(
-            "this command contains only {} unnamed substitutions \"{{}}\", while {} arguments are provided",
+            "this command contains only {} unnamed substitutions \"{{}}\", while {} arguments were provided",
             expected,
             input.args.len(),
         ),
