@@ -1,5 +1,7 @@
 ## To-do
 
+- Serde-compatible de/serialization for other applications unfamiliar with
+netlink encoding.
 - A codegen proc-macro to quickly load on yaml specifications out-of-tree.
 - `.get_<attr>()` methods don't have to internally use the iterator, instead
 simply skipping attributes based only on their type number.
