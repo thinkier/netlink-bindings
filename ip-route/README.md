@@ -103,15 +103,16 @@ function if need be.
 
 ## Inner workings
 
-_You may stop reading here if you're only interested in the using already
+_You may stop reading here if you're only interested in using the already
 supported commands through the macro._
 
 `ip!()` macro transforms your command into code that uses netlink-bindings to
 encode the message.
 
-Internally, the commands is parsed according to a regex-like descriptions, that
-also contains variable substations and code blocks helping to shape the final
-message. Command descriptions reside in [`./syntax/ip*.rs`](./syntax).
+Internally, a command is parsed according to its regex-like description that
+may additionally contain variable substitutions and code blocks helping to
+shape the final message. Command descriptions reside in
+[`./syntax/ip*.rs`](./syntax).
 
 A bit simplifying, `ip!()` macro expansion looks like this:
 
@@ -294,9 +295,9 @@ ip_interp_cli(&["ip" "link" "set" "dev", ifname, "up"])
 ```
 
 The idea behind it is to have hierarchy of nodes that maps nicely onto the
-usual Rust's scoping rules, i.e. the syntax description to be an acyclic graph,
-aka a tree. The very same idea also makes it possible to conditionally toggle
-parameters by passing an `Option` in place of any value.
+usual Rust's scoping rules, i.e. the syntax description to be a tree. The very
+same idea also makes it possible to conditionally toggle parameters by passing
+an `Option` in place of any value.
 
 Assigning each `Map` in a tree a unique index, it's possible to capture order
 they're visited when parsing a particular command. For example, using the
