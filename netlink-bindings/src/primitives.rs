@@ -4,10 +4,7 @@ pub use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketA
 macro_rules! gen_parse {
     ($name:ident => $from:ident, $type:ident) => {
         pub fn $name(buf: &[u8]) -> Option<$type> {
-            if buf.len() != size_of::<$type>() {
-                return None;
-            }
-            Some($type::$from(buf.try_into().unwrap()))
+            Some($type::$from(*buf.first_chunk()?))
         }
     };
     ($($name:ident => $from:ident, $type:ident;)+) => {
