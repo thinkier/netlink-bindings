@@ -1,0 +1,11 @@
+[package]
+name = "strip-async"
+description = "Strip async and .await (with zero external dependencies)"
+version = "1.0.0"
+authors = [ "Remy D. Farley <one-d-wide@protonmail.com>" ]
+repository = "https://github.com/one-d-wide/netlink-bindings"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
