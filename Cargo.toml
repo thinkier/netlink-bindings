@@ -8,6 +8,7 @@ members = [
   "ip-route",
   "ip-route/syntax",
   "ip-route/proc-macro",
+  "strip-async",
 ]
 
 [workspace.package]
@@ -26,3 +27,4 @@ ip-route-proc-macro = { path = "./ip-route/proc-macro" }
 # ip-route-proc-macro = "0.3"
 
 reverse-lookup = { path = "./reverse-lookup" }
+strip-async = { path = "./strip-async" }

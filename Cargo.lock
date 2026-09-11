@@ -483,17 +483,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc04a4c58212d57930a24bf47d3fa87485264a3a054e9c10e042eb373573ad3c"
 
 [[package]]
-name = "maybe-async"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "746873a384ad60adc5db74471dfaba74bd278afbdcfd81db93fafcdfc8b5ca0c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -538,10 +527,10 @@ dependencies = [
  "ip-route",
  "libc",
  "macro_rules_attribute",
- "maybe-async",
  "netlink-bindings",
  "smol",
  "smol-macros",
+ "strip-async",
  "tokio",
 ]
 
@@ -810,6 +799,10 @@ dependencies = [
  "libc",
  "windows-sys",
 ]
+
+[[package]]
+name = "strip-async"
+version = "1.0.0"
 
 [[package]]
 name = "syn"

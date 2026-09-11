@@ -20,8 +20,7 @@ pub use crate::tokio::*;
 #[cfg(all(not(feature = "std"), not(feature = "tokio"), feature = "smol"))]
 pub use crate::smol::*;
 
-use maybe_async::async_impl as keep;
-use maybe_async::sync_impl as skip;
+use strip_async::{keep, skip, strip_async};
 
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", not(feature = "async")))))]
 #[cfg(any(feature = "std", not(feature = "async")))]
@@ -32,7 +31,7 @@ pub mod std {
     use crate::skip as only_async;
     use crate::skip as only_tokio;
 
-    use maybe_async::must_be_sync as strip_async;
+    use crate::strip_async;
 
     use std::{
         io::{Read, Write},
@@ -59,7 +58,7 @@ pub mod tokio {
     use crate::skip as only_sync;
     use crate::skip as not_tokio;
 
-    use maybe_async::must_be_async as strip_async;
+    use crate::keep as strip_async;
 
     use tokio::{
         io::{AsyncReadExt as Read, AsyncWriteExt as Write},
@@ -86,7 +85,7 @@ pub mod smol {
     use crate::skip as only_tokio;
     use crate::skip as only_sync;
 
-    use maybe_async::must_be_async as strip_async;
+    use crate::keep as strip_async;
 
     use smol::io::{AsyncReadExt as Read, AsyncWriteExt as Write};
     type Socket = smol::Async<std::net::TcpStream>;

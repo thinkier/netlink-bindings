@@ -80,7 +80,7 @@ ip-route.workspace = true
 libc = "0.2"
 netlink-bindings = { workspace = true, features = [ "nlctrl" ] }
 
-maybe-async = "0"
+strip-async = { workspace = true }
 
 tokio = { optional = true, version = "1", features = [ "net", "io-util", "rt", "macros" ] }
 
