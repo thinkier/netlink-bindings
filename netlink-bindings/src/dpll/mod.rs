@@ -146,6 +146,8 @@ pub enum PinType {
     IntOscillator = 4,
     #[doc = "GNSS recovered clock\n"]
     Gnss = 5,
+    #[doc = "Device internal numerically controlled oscillator. When connected as a\nDPLL input, the DPLL enters NCO mode where the output frequency is\nadjusted by the host via the PTP clock interface.\n"]
+    IntNco = 6,
 }
 impl PinType {
     pub fn from_value(value: u64) -> Option<Self> {
@@ -155,6 +157,7 @@ impl PinType {
             3 => Self::SynceEthPort,
             4 => Self::IntOscillator,
             5 => Self::Gnss,
+            6 => Self::IntNco,
             _ => return None,
         })
     }
@@ -236,6 +239,8 @@ pub enum PinCapabilities {
     PriorityCanChange = 1 << 1,
     #[doc = "pin state can be changed\n"]
     StateCanChange = 1 << 2,
+    #[doc = "pin state can be set to connected regardless of current DPLL device\nmode, overriding the active input selection. Requires state-can-change\nto be set as well.\n"]
+    StateConnectedOverride = 1 << 3,
 }
 impl PinCapabilities {
     pub fn from_value(value: u64) -> Option<Self> {
@@ -243,6 +248,7 @@ impl PinCapabilities {
             n if n == 1 << 0 => Self::DirectionCanChange,
             n if n == 1 << 1 => Self::PriorityCanChange,
             n if n == 1 << 2 => Self::StateCanChange,
+            n if n == 1 << 3 => Self::StateConnectedOverride,
             _ => return None,
         })
     }
@@ -850,7 +856,7 @@ pub enum Pin<'a> {
     PhaseAdjustMax(i32),
     PhaseAdjust(i32),
     PhaseOffset(i64),
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPM\n(parts per million). This is a lower-precision version of\nfractional-frequency-offset-ppt.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPM (parts per million).\nThis is a lower-precision version of fractional-frequency-offset-ppt.\n"]
     FractionalFrequencyOffset(i32),
     #[doc = "Frequency of Embedded SYNC signal. If provided, the pin is configured\nwith a SYNC signal embedded into its base clock frequency.\n"]
     EsyncFrequency(u64),
@@ -862,7 +868,7 @@ pub enum Pin<'a> {
     ReferenceSync(IterableReferenceSync<'a>),
     #[doc = "Granularity of phase adjustment, in picoseconds. The value of phase\nadjustment must be a multiple of this granularity.\n"]
     PhaseAdjustGran(u32),
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPT\n(parts per trillion, 10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPT (parts per trillion,\n10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
     FractionalFrequencyOffsetPpt(i32),
     #[doc = "The measured frequency of the input pin in millihertz (mHz). Value of\n(DPLL_A_PIN_MEASURED_FREQUENCY / DPLL_PIN_MEASURED_FREQUENCY_DIVIDER) is\nan integer part (Hz) of a measured frequency value. Value of\n(DPLL_A_PIN_MEASURED_FREQUENCY % DPLL_PIN_MEASURED_FREQUENCY_DIVIDER) is\na fractional part of a measured frequency value.\n"]
     MeasuredFrequency(u64),
@@ -1208,7 +1214,7 @@ impl<'a> IterablePin<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPM\n(parts per million). This is a lower-precision version of\nfractional-frequency-offset-ppt.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPM (parts per million).\nThis is a lower-precision version of fractional-frequency-offset-ppt.\n"]
     pub fn get_fractional_frequency_offset(&self) -> Result<i32, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
@@ -1296,7 +1302,7 @@ impl<'a> IterablePin<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPT\n(parts per trillion, 10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPT (parts per trillion,\n10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
     pub fn get_fractional_frequency_offset_ppt(&self) -> Result<i32, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
@@ -1899,9 +1905,9 @@ pub enum PinParentDevice {
     #[doc = "Associated type: [`PinState`] (enum)"]
     State(u32),
     PhaseOffset(i64),
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPM\n(parts per million). This is a lower-precision version of\nfractional-frequency-offset-ppt.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPM (parts per million).\nThis is a lower-precision version of fractional-frequency-offset-ppt.\n"]
     FractionalFrequencyOffset(i32),
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPT\n(parts per trillion, 10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPT (parts per trillion,\n10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
     FractionalFrequencyOffsetPpt(i32),
     #[doc = "Operational state of the pin with respect to its parent DPLL device.\nUnlike state (which reflects the administrative intent), operstate\nreflects the actual hardware status.\n\nAssociated type: [`PinOperstate`] (enum)"]
     Operstate(u32),
@@ -1984,7 +1990,7 @@ impl<'a> IterablePinParentDevice<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPM\n(parts per million). This is a lower-precision version of\nfractional-frequency-offset-ppt.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPM (parts per million).\nThis is a lower-precision version of fractional-frequency-offset-ppt.\n"]
     pub fn get_fractional_frequency_offset(&self) -> Result<i32, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
@@ -2000,7 +2006,7 @@ impl<'a> IterablePinParentDevice<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPT\n(parts per trillion, 10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPT (parts per trillion,\n10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
     pub fn get_fractional_frequency_offset_ppt(&self) -> Result<i32, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
@@ -3111,7 +3117,7 @@ impl<Prev: Pusher> PushPin<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPM\n(parts per million). This is a lower-precision version of\nfractional-frequency-offset-ppt.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPM (parts per million).\nThis is a lower-precision version of fractional-frequency-offset-ppt.\n"]
     pub fn push_fractional_frequency_offset(mut self, value: i32) -> Self {
         push_header(self.as_vec_mut(), 24u16, 4 as u16);
         self.as_vec_mut().extend(value.to_ne_bytes());
@@ -3151,7 +3157,7 @@ impl<Prev: Pusher> PushPin<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPT\n(parts per trillion, 10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPT (parts per trillion,\n10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
     pub fn push_fractional_frequency_offset_ppt(mut self, value: i32) -> Self {
         push_header(self.as_vec_mut(), 30u16, 4 as u16);
         self.as_vec_mut().extend(value.to_ne_bytes());
@@ -3232,13 +3238,13 @@ impl<Prev: Pusher> PushPinParentDevice<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPM\n(parts per million). This is a lower-precision version of\nfractional-frequency-offset-ppt.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPM (parts per million).\nThis is a lower-precision version of fractional-frequency-offset-ppt.\n"]
     pub fn push_fractional_frequency_offset(mut self, value: i32) -> Self {
         push_header(self.as_vec_mut(), 24u16, 4 as u16);
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. Value is in PPT\n(parts per trillion, 10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
+    #[doc = "The FFO (Fractional Frequency Offset) of the pin. At top level this\nrepresents the RX vs TX symbol rate offset on the media associated with\nthe pin. Inside the pin-parent-device nest it represents the frequency\noffset between the pin and its parent DPLL device. For pins of type\nPIN_TYPE_INT_NCO this represents the DPLL\\'s current output frequency\noffset from its nominal frequency. Value is in PPT (parts per trillion,\n10\\^-12). This is a higher-precision version of\nfractional-frequency-offset.\n"]
     pub fn push_fractional_frequency_offset_ppt(mut self, value: i32) -> Self {
         push_header(self.as_vec_mut(), 30u16, 4 as u16);
         self.as_vec_mut().extend(value.to_ne_bytes());

@@ -51,6 +51,27 @@ impl RtmType {
         })
     }
 }
+#[doc = "Why the kernel deleted a route. New causes may be appended. The value\nspace is family-agnostic, a value is never reinterpreted per address\nfamily.\n"]
+#[doc = "Enum - defines an integer enumeration, with values for each entry incrementing by 1, (e.g. 0, 1, 2, 3)"]
+#[derive(Debug, Clone, Copy)]
+pub enum DelReason {
+    #[doc = "The deletion path does not record a cause.\n"]
+    Unspec = 0,
+    #[doc = "The RTF_EXPIRES lifetime ran out and the route was garbage collected.\n"]
+    Expired = 1,
+    #[doc = "A Router Advertisement withdrew the route with a zero lifetime.\n"]
+    RaWithdrawn = 2,
+}
+impl DelReason {
+    pub fn from_value(value: u64) -> Option<Self> {
+        Some(match value {
+            0 => Self::Unspec,
+            1 => Self::Expired,
+            2 => Self::RaWithdrawn,
+            _ => return None,
+        })
+    }
+}
 #[doc = "Flags - defines an integer enumeration, with values for each entry occupying a bit, starting from bit 0, (e.g. 1, 2, 4, 8)"]
 #[derive(Debug, Clone, Copy)]
 pub enum RtmFlag {
@@ -291,6 +312,8 @@ pub enum RouteAttrs<'a> {
     Dport(u16),
     NhId(u32),
     Flowlabel(u32),
+    #[doc = "Emitted only on RTM_DELROUTE notifications, and only when the deletion\npath records a cause. An absent attribute means either an older kernel\nor a deletion path that does not record its cause, consumers must treat\nabsent and unspec identically. Currently only IPv6 deletion paths record\na cause. The attribute is notification-only, the kernel rejects it in\nrequests.\n\nAssociated type: [`DelReason`] (enum)"]
+    DelReason(u32),
 }
 impl<'a> IterableRouteAttrs<'a> {
     pub fn get_dst(&self) -> Result<std::net::IpAddr, ErrorContext> {
@@ -758,6 +781,22 @@ impl<'a> IterableRouteAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
+    #[doc = "Emitted only on RTM_DELROUTE notifications, and only when the deletion\npath records a cause. An absent attribute means either an older kernel\nor a deletion path that does not record its cause, consumers must treat\nabsent and unspec identically. Currently only IPv6 deletion paths record\na cause. The attribute is notification-only, the kernel rejects it in\nrequests.\n\nAssociated type: [`DelReason`] (enum)"]
+    pub fn get_del_reason(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(RouteAttrs::DelReason(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "RouteAttrs",
+            "DelReason",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
 }
 impl RouteAttrs<'_> {
     pub fn new<'a>(buf: &'a [u8]) -> IterableRouteAttrs<'a> {
@@ -796,6 +835,7 @@ impl RouteAttrs<'_> {
             29u16 => "Dport",
             30u16 => "NhId",
             31u16 => "Flowlabel",
+            32u16 => "DelReason",
             _ => return None,
         };
         Some(res)
@@ -991,6 +1031,11 @@ impl<'a> Iterator for IterableRouteAttrs<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
+                32u16 => RouteAttrs::DelReason({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
                 n => continue,
             };
@@ -1056,6 +1101,9 @@ impl<'a> std::fmt::Debug for IterableRouteAttrs<'_> {
                 RouteAttrs::Dport(val) => fmt.field("Dport", &val),
                 RouteAttrs::NhId(val) => fmt.field("NhId", &val),
                 RouteAttrs::Flowlabel(val) => fmt.field("Flowlabel", &val),
+                RouteAttrs::DelReason(val) => {
+                    fmt.field("DelReason", &FormatEnum(val.into(), DelReason::from_value))
+                }
             };
         }
         fmt.finish()
@@ -1268,6 +1316,12 @@ impl IterableRouteAttrs<'_> {
                 RouteAttrs::Flowlabel(val) => {
                     if last_off == offset {
                         stack.push(("Flowlabel", last_off));
+                        break;
+                    }
+                }
+                RouteAttrs::DelReason(val) => {
+                    if last_off == offset {
+                        stack.push(("DelReason", last_off));
                         break;
                     }
                 }
@@ -2108,6 +2162,12 @@ impl<Prev: Pusher> PushRouteAttrs<Prev> {
         self.as_vec_mut().extend(value.to_be_bytes());
         self
     }
+    #[doc = "Emitted only on RTM_DELROUTE notifications, and only when the deletion\npath records a cause. An absent attribute means either an older kernel\nor a deletion path that does not record its cause, consumers must treat\nabsent and unspec identically. Currently only IPv6 deletion paths record\na cause. The attribute is notification-only, the kernel rejects it in\nrequests.\n\nAssociated type: [`DelReason`] (enum)"]
+    pub fn push_del_reason(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 32u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
 }
 impl<Prev: Pusher> Drop for PushRouteAttrs<Prev> {
     fn drop(&mut self) {
@@ -2249,7 +2309,7 @@ impl<Prev: Pusher> Drop for PushMetrics<Prev> {
         }
     }
 }
-#[doc = "Dump route information.\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n\n"]
+#[doc = "Dump route information.\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n- [.get_del_reason()](IterableRouteAttrs::get_del_reason)\n\n"]
 #[derive(Debug)]
 pub struct OpGetrouteDump<'r> {
     request: Request<'r>,
@@ -2320,7 +2380,7 @@ impl NetlinkRequest for OpGetrouteDump<'_> {
             .lookup_attr(offset, missing_type)
     }
 }
-#[doc = "Dump route information.\n\nRequest attributes:\n- [.push_dst()](PushRouteAttrs::push_dst)\n- [.push_src()](PushRouteAttrs::push_src)\n- [.push_iif()](PushRouteAttrs::push_iif)\n- [.push_oif()](PushRouteAttrs::push_oif)\n- [.push_mark()](PushRouteAttrs::push_mark)\n- [.push_uid()](PushRouteAttrs::push_uid)\n- [.push_ip_proto()](PushRouteAttrs::push_ip_proto)\n- [.push_sport()](PushRouteAttrs::push_sport)\n- [.push_dport()](PushRouteAttrs::push_dport)\n- [.push_flowlabel()](PushRouteAttrs::push_flowlabel)\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n\n"]
+#[doc = "Dump route information.\n\nRequest attributes:\n- [.push_dst()](PushRouteAttrs::push_dst)\n- [.push_src()](PushRouteAttrs::push_src)\n- [.push_iif()](PushRouteAttrs::push_iif)\n- [.push_oif()](PushRouteAttrs::push_oif)\n- [.push_mark()](PushRouteAttrs::push_mark)\n- [.push_uid()](PushRouteAttrs::push_uid)\n- [.push_ip_proto()](PushRouteAttrs::push_ip_proto)\n- [.push_sport()](PushRouteAttrs::push_sport)\n- [.push_dport()](PushRouteAttrs::push_dport)\n- [.push_flowlabel()](PushRouteAttrs::push_flowlabel)\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n- [.get_del_reason()](IterableRouteAttrs::get_del_reason)\n\n"]
 #[derive(Debug)]
 pub struct OpGetrouteDo<'r> {
     request: Request<'r>,
@@ -2776,14 +2836,14 @@ impl<'buf> Request<'buf> {
         self.flags |= consts::NLM_F_DUMP as u16;
         self
     }
-    #[doc = "Dump route information.\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n\n"]
+    #[doc = "Dump route information.\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n- [.get_del_reason()](IterableRouteAttrs::get_del_reason)\n\n"]
     pub fn op_getroute_dump(self, header: &Rtmsg) -> OpGetrouteDump<'buf> {
         let mut res = OpGetrouteDump::new(self, header);
         res.request
             .do_writeback(res.protocol(), "op-getroute-dump", OpGetrouteDump::lookup);
         res
     }
-    #[doc = "Dump route information.\n\nRequest attributes:\n- [.push_dst()](PushRouteAttrs::push_dst)\n- [.push_src()](PushRouteAttrs::push_src)\n- [.push_iif()](PushRouteAttrs::push_iif)\n- [.push_oif()](PushRouteAttrs::push_oif)\n- [.push_mark()](PushRouteAttrs::push_mark)\n- [.push_uid()](PushRouteAttrs::push_uid)\n- [.push_ip_proto()](PushRouteAttrs::push_ip_proto)\n- [.push_sport()](PushRouteAttrs::push_sport)\n- [.push_dport()](PushRouteAttrs::push_dport)\n- [.push_flowlabel()](PushRouteAttrs::push_flowlabel)\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n\n"]
+    #[doc = "Dump route information.\n\nRequest attributes:\n- [.push_dst()](PushRouteAttrs::push_dst)\n- [.push_src()](PushRouteAttrs::push_src)\n- [.push_iif()](PushRouteAttrs::push_iif)\n- [.push_oif()](PushRouteAttrs::push_oif)\n- [.push_mark()](PushRouteAttrs::push_mark)\n- [.push_uid()](PushRouteAttrs::push_uid)\n- [.push_ip_proto()](PushRouteAttrs::push_ip_proto)\n- [.push_sport()](PushRouteAttrs::push_sport)\n- [.push_dport()](PushRouteAttrs::push_dport)\n- [.push_flowlabel()](PushRouteAttrs::push_flowlabel)\n\nReply attributes:\n- [.get_dst()](IterableRouteAttrs::get_dst)\n- [.get_src()](IterableRouteAttrs::get_src)\n- [.get_iif()](IterableRouteAttrs::get_iif)\n- [.get_oif()](IterableRouteAttrs::get_oif)\n- [.get_gateway()](IterableRouteAttrs::get_gateway)\n- [.get_priority()](IterableRouteAttrs::get_priority)\n- [.get_prefsrc()](IterableRouteAttrs::get_prefsrc)\n- [.get_metrics()](IterableRouteAttrs::get_metrics)\n- [.get_multipath()](IterableRouteAttrs::get_multipath)\n- [.get_flow()](IterableRouteAttrs::get_flow)\n- [.get_cacheinfo()](IterableRouteAttrs::get_cacheinfo)\n- [.get_table()](IterableRouteAttrs::get_table)\n- [.get_mark()](IterableRouteAttrs::get_mark)\n- [.get_mfc_stats()](IterableRouteAttrs::get_mfc_stats)\n- [.get_via()](IterableRouteAttrs::get_via)\n- [.get_newdst()](IterableRouteAttrs::get_newdst)\n- [.get_pref()](IterableRouteAttrs::get_pref)\n- [.get_encap_type()](IterableRouteAttrs::get_encap_type)\n- [.get_encap()](IterableRouteAttrs::get_encap)\n- [.get_expires()](IterableRouteAttrs::get_expires)\n- [.get_pad()](IterableRouteAttrs::get_pad)\n- [.get_uid()](IterableRouteAttrs::get_uid)\n- [.get_ttl_propagate()](IterableRouteAttrs::get_ttl_propagate)\n- [.get_ip_proto()](IterableRouteAttrs::get_ip_proto)\n- [.get_sport()](IterableRouteAttrs::get_sport)\n- [.get_dport()](IterableRouteAttrs::get_dport)\n- [.get_nh_id()](IterableRouteAttrs::get_nh_id)\n- [.get_flowlabel()](IterableRouteAttrs::get_flowlabel)\n- [.get_del_reason()](IterableRouteAttrs::get_del_reason)\n\n"]
     pub fn op_getroute_do(self, header: &Rtmsg) -> OpGetrouteDo<'buf> {
         let mut res = OpGetrouteDo::new(self, header);
         res.request
@@ -2811,6 +2871,7 @@ mod generated_tests {
     #[test]
     fn tests() {
         let _ = IterableRouteAttrs::get_cacheinfo;
+        let _ = IterableRouteAttrs::get_del_reason;
         let _ = IterableRouteAttrs::get_dport;
         let _ = IterableRouteAttrs::get_dst;
         let _ = IterableRouteAttrs::get_encap;

@@ -5012,6 +5012,18 @@ impl Debug for ReverseLookup {
                                 fmt,
                             );
                         }
+                        if let (19u8, None, true) = pat {
+                            return Debug::fmt(
+                                &netlink_bindings::nfsd::OpServerStatsGetDump::decode_reply(buf),
+                                fmt,
+                            );
+                        }
+                        if let (19u8, Some(19u8), true) = pat {
+                            return Debug::fmt(
+                                &netlink_bindings::nfsd::OpServerStatsGetDump::decode_reply(buf),
+                                fmt,
+                            );
+                        }
                         write!(
                             fmt,
                             "(Unknown genl operation) value={value}, request_value={request_value:?}, is_dump={is_dump}"
@@ -6813,6 +6825,9 @@ pub fn get_operation_genl(proto: &[u8], cmd: u8) -> Vec<&'static str> {
         }
         if cmd == 18u8 {
             res.push(stringify!(nfsd::OpUnlockExportDo));
+        }
+        if cmd == 19u8 {
+            res.push(stringify!(nfsd::OpServerStatsGetDump));
         }
     }
     if proto == b"nl80211" {

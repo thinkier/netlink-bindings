@@ -3955,6 +3955,8 @@ pub enum Dmabuf<'a> {
     Fd(u32),
     #[doc = "id of the dmabuf binding\n"]
     Id(u32),
+    #[doc = "Size in bytes of each device page the NIC writes into from the bound\ndmabuf. Must be a power of two and \\>= PAGE_SIZE; defaults to PAGE_SIZE.\n"]
+    RxPageSize(u32),
 }
 impl<'a> IterableDmabuf<'a> {
     #[doc = "netdev ifindex to bind the dmabuf to.\n"]
@@ -4015,6 +4017,22 @@ impl<'a> IterableDmabuf<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
+    #[doc = "Size in bytes of each device page the NIC writes into from the bound\ndmabuf. Must be a power of two and \\>= PAGE_SIZE; defaults to PAGE_SIZE.\n"]
+    pub fn get_rx_page_size(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(Dmabuf::RxPageSize(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "Dmabuf",
+            "RxPageSize",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
 }
 impl Dmabuf<'_> {
     pub fn new<'a>(buf: &'a [u8]) -> IterableDmabuf<'a> {
@@ -4026,6 +4044,7 @@ impl Dmabuf<'_> {
             2u16 => "Queues",
             3u16 => "Fd",
             4u16 => "Id",
+            5u16 => "RxPageSize",
             _ => return None,
         };
         Some(res)
@@ -4086,6 +4105,11 @@ impl<'a> Iterator for IterableDmabuf<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
+                5u16 => Dmabuf::RxPageSize({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
                 n => continue,
             };
@@ -4124,6 +4148,7 @@ impl<'a> std::fmt::Debug for IterableDmabuf<'_> {
                 Dmabuf::Queues(val) => fmt.field("Queues", &val),
                 Dmabuf::Fd(val) => fmt.field("Fd", &val),
                 Dmabuf::Id(val) => fmt.field("Id", &val),
+                Dmabuf::RxPageSize(val) => fmt.field("RxPageSize", &val),
             };
         }
         fmt.finish()
@@ -4171,6 +4196,12 @@ impl IterableDmabuf<'_> {
                 Dmabuf::Id(val) => {
                     if last_off == offset {
                         stack.push(("Id", last_off));
+                        break;
+                    }
+                }
+                Dmabuf::RxPageSize(val) => {
+                    if last_off == offset {
+                        stack.push(("RxPageSize", last_off));
                         break;
                     }
                 }
@@ -5118,6 +5149,12 @@ impl<Prev: Pusher> PushDmabuf<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
+    #[doc = "Size in bytes of each device page the NIC writes into from the bound\ndmabuf. Must be a power of two and \\>= PAGE_SIZE; defaults to PAGE_SIZE.\n"]
+    pub fn push_rx_page_size(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 5u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
 }
 impl<Prev: Pusher> Drop for PushDmabuf<Prev> {
     fn drop(&mut self) {
@@ -5882,7 +5919,7 @@ impl NetlinkRequest for OpQstatsGetDump<'_> {
         Self::decode_request(buf).lookup_attr(offset, missing_type)
     }
 }
-#[doc = "Bind dmabuf to netdev\n\nFlags: uns-admin-perm\n\nRequest attributes:\n- [.push_ifindex()](PushDmabuf::push_ifindex)\n- [.nested_queues()](PushDmabuf::nested_queues)\n- [.push_fd()](PushDmabuf::push_fd)\n\nReply attributes:\n- [.get_id()](IterableDmabuf::get_id)\n\n"]
+#[doc = "Bind dmabuf to netdev\n\nFlags: uns-admin-perm\n\nRequest attributes:\n- [.push_ifindex()](PushDmabuf::push_ifindex)\n- [.nested_queues()](PushDmabuf::nested_queues)\n- [.push_fd()](PushDmabuf::push_fd)\n- [.push_rx_page_size()](PushDmabuf::push_rx_page_size)\n\nReply attributes:\n- [.get_id()](IterableDmabuf::get_id)\n\n"]
 #[derive(Debug)]
 pub struct OpBindRxDo<'r> {
     request: Request<'r>,
@@ -6326,7 +6363,7 @@ impl<'buf> Request<'buf> {
         );
         res
     }
-    #[doc = "Bind dmabuf to netdev\n\nFlags: uns-admin-perm\n\nRequest attributes:\n- [.push_ifindex()](PushDmabuf::push_ifindex)\n- [.nested_queues()](PushDmabuf::nested_queues)\n- [.push_fd()](PushDmabuf::push_fd)\n\nReply attributes:\n- [.get_id()](IterableDmabuf::get_id)\n\n"]
+    #[doc = "Bind dmabuf to netdev\n\nFlags: uns-admin-perm\n\nRequest attributes:\n- [.push_ifindex()](PushDmabuf::push_ifindex)\n- [.nested_queues()](PushDmabuf::nested_queues)\n- [.push_fd()](PushDmabuf::push_fd)\n- [.push_rx_page_size()](PushDmabuf::push_rx_page_size)\n\nReply attributes:\n- [.get_id()](IterableDmabuf::get_id)\n\n"]
     pub fn op_bind_rx_do(self) -> OpBindRxDo<'buf> {
         let mut res = OpBindRxDo::new(self);
         res.request
@@ -6445,6 +6482,7 @@ mod generated_tests {
         let _ = PushDmabuf::<&mut Vec<u8>>::nested_queues;
         let _ = PushDmabuf::<&mut Vec<u8>>::push_fd;
         let _ = PushDmabuf::<&mut Vec<u8>>::push_ifindex;
+        let _ = PushDmabuf::<&mut Vec<u8>>::push_rx_page_size;
         let _ = PushNapi::<&mut Vec<u8>>::push_defer_hard_irqs;
         let _ = PushNapi::<&mut Vec<u8>>::push_gro_flush_timeout;
         let _ = PushNapi::<&mut Vec<u8>>::push_id;

@@ -626,6 +626,8 @@ pub enum Devlink<'a> {
     Index(u32),
     #[doc = "Bitmask selecting which resource classes to include in a resource-dump\nresponse. Bit 0 (dev) selects device-level resources; bit 1 (port)\nselects port-level resources. When absent all classes are returned.\n\nAssociated type: [`ResourceScope`] (1 bit per enumeration)"]
     ResourceScopeMask(u32),
+    #[doc = "Identifies the devlink instance which owns the parent rate node. Used\nwith rate-set and rate-new to parent a rate object to a node on a\ndifferent devlink instance, enabling cross-device rate scheduling. When\nabsent, the parent node is resolved on the same instance.\n"]
+    ParentDev(IterableDlParentDev<'a>),
 }
 impl<'a> IterableDevlink<'a> {
     pub fn get_bus_name(&self) -> Result<&'a CStr, ErrorContext> {
@@ -3293,6 +3295,22 @@ impl<'a> IterableDevlink<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
+    #[doc = "Identifies the devlink instance which owns the parent rate node. Used\nwith rate-set and rate-new to parent a rate object to a node on a\ndifferent devlink instance, enabling cross-device rate scheduling. When\nabsent, the parent node is resolved on the same instance.\n"]
+    pub fn get_parent_dev(&self) -> Result<IterableDlParentDev<'a>, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(Devlink::ParentDev(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "Devlink",
+            "ParentDev",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
 }
 impl Devlink<'_> {
     pub fn new<'a>(buf: &'a [u8]) -> IterableDevlink<'a> {
@@ -3479,6 +3497,7 @@ impl Devlink<'_> {
             183u16 => "ParamResetDefault",
             184u16 => "Index",
             185u16 => "ResourceScopeMask",
+            186u16 => "ParentDev",
             _ => return None,
         };
         Some(res)
@@ -4391,6 +4410,11 @@ impl<'a> Iterator for IterableDevlink<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
+                186u16 => Devlink::ParentDev({
+                    let res = Some(IterableDlParentDev::with_loc(next, self.orig_loc));
+                    let Some(val) = res else { break };
+                    val
+                }),
                 n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
                 n => continue,
             };
@@ -4690,6 +4714,7 @@ impl<'a> std::fmt::Debug for IterableDevlink<'_> {
                         ResourceScope::from_value(val.trailing_zeros().into())
                     }),
                 ),
+                Devlink::ParentDev(val) => fmt.field("ParentDev", &val),
             };
         }
         fmt.finish()
@@ -5787,6 +5812,12 @@ impl IterableDevlink<'_> {
                 Devlink::ResourceScopeMask(val) => {
                     if last_off == offset {
                         stack.push(("ResourceScopeMask", last_off));
+                        break;
+                    }
+                }
+                Devlink::ParentDev(val) => {
+                    (stack, missing) = val.lookup_attr(offset, missing_type);
+                    if !stack.is_empty() {
                         break;
                     }
                 }
@@ -13190,6 +13221,212 @@ impl IterableDlRateTcBws<'_> {
         (stack, None)
     }
 }
+#[derive(Clone)]
+pub enum DlParentDev<'a> {
+    BusName(&'a CStr),
+    DevName(&'a CStr),
+    #[doc = "Unique devlink instance index.\n"]
+    Index(u32),
+}
+impl<'a> IterableDlParentDev<'a> {
+    pub fn get_bus_name(&self) -> Result<&'a CStr, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(DlParentDev::BusName(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "DlParentDev",
+            "BusName",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_dev_name(&self) -> Result<&'a CStr, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(DlParentDev::DevName(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "DlParentDev",
+            "DevName",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    #[doc = "Unique devlink instance index.\n"]
+    pub fn get_index(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(DlParentDev::Index(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "DlParentDev",
+            "Index",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+}
+impl DlParentDev<'_> {
+    pub fn new<'a>(buf: &'a [u8]) -> IterableDlParentDev<'a> {
+        IterableDlParentDev::with_loc(buf, buf.as_ptr() as usize)
+    }
+    fn attr_from_type(r#type: u16) -> Option<&'static str> {
+        Devlink::attr_from_type(r#type)
+    }
+}
+#[derive(Clone, Copy, Default)]
+pub struct IterableDlParentDev<'a> {
+    buf: &'a [u8],
+    pos: usize,
+    orig_loc: usize,
+}
+impl<'a> IterableDlParentDev<'a> {
+    fn with_loc(buf: &'a [u8], orig_loc: usize) -> Self {
+        Self {
+            buf,
+            pos: 0,
+            orig_loc,
+        }
+    }
+    pub fn get_buf(&self) -> &'a [u8] {
+        self.buf
+    }
+}
+impl<'a> Iterator for IterableDlParentDev<'a> {
+    type Item = Result<DlParentDev<'a>, ErrorContext>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut pos;
+        let mut r#type;
+        loop {
+            pos = self.pos;
+            r#type = None;
+            if self.buf.len() == self.pos {
+                return None;
+            }
+            let Some((header, next)) = chop_header(self.buf, &mut self.pos) else {
+                self.pos = self.buf.len();
+                break;
+            };
+            r#type = Some(header.r#type);
+            let res = match header.r#type {
+                1u16 => DlParentDev::BusName({
+                    let res = CStr::from_bytes_with_nul(next).ok();
+                    let Some(val) = res else { break };
+                    val
+                }),
+                2u16 => DlParentDev::DevName({
+                    let res = CStr::from_bytes_with_nul(next).ok();
+                    let Some(val) = res else { break };
+                    val
+                }),
+                184u16 => DlParentDev::Index({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
+                n => continue,
+            };
+            return Some(Ok(res));
+        }
+        Some(Err(ErrorContext::new(
+            "DlParentDev",
+            r#type.and_then(|t| DlParentDev::attr_from_type(t)),
+            self.orig_loc,
+            self.buf.as_ptr().wrapping_add(pos) as usize,
+        )))
+    }
+}
+impl<'a> std::fmt::Debug for IterableDlParentDev<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut fmt = f.debug_struct("DlParentDev");
+        let mut iter = IterableDlParentDev::with_loc(&[], self.orig_loc);
+        for attr in IterateAttrs::new(self.get_buf()) {
+            iter.buf = attr;
+            iter.pos = 0;
+            let Some(attr) = iter.next() else {
+                fmt.field("Err", &FormatUnrecognized(attr));
+                continue;
+            };
+            let attr = match attr {
+                Ok(a) => a,
+                Err(err) => {
+                    fmt.finish()?;
+                    f.write_str("Err(")?;
+                    err.fmt(f)?;
+                    return f.write_str(")");
+                }
+            };
+            match attr {
+                DlParentDev::BusName(val) => fmt.field("BusName", &val),
+                DlParentDev::DevName(val) => fmt.field("DevName", &val),
+                DlParentDev::Index(val) => fmt.field("Index", &val),
+            };
+        }
+        fmt.finish()
+    }
+}
+impl IterableDlParentDev<'_> {
+    pub fn lookup_attr(
+        &self,
+        offset: usize,
+        missing_type: Option<u16>,
+    ) -> (Vec<(&'static str, usize)>, Option<&'static str>) {
+        let mut stack = Vec::new();
+        let cur = ErrorContext::calc_offset(self.orig_loc, self.buf.as_ptr() as usize);
+        if missing_type.is_some() && cur == offset {
+            stack.push(("DlParentDev", offset));
+            return (
+                stack,
+                missing_type.and_then(|t| DlParentDev::attr_from_type(t)),
+            );
+        }
+        if cur > offset || cur + self.buf.len() < offset {
+            return (stack, None);
+        }
+        let mut attrs = self.clone();
+        let mut last_off = cur + attrs.pos;
+        while let Some(attr) = attrs.next() {
+            let Ok(attr) = attr else { break };
+            match attr {
+                DlParentDev::BusName(val) => {
+                    if last_off == offset {
+                        stack.push(("BusName", last_off));
+                        break;
+                    }
+                }
+                DlParentDev::DevName(val) => {
+                    if last_off == offset {
+                        stack.push(("DevName", last_off));
+                        break;
+                    }
+                }
+                DlParentDev::Index(val) => {
+                    if last_off == offset {
+                        stack.push(("Index", last_off));
+                        break;
+                    }
+                }
+                _ => {}
+            };
+            last_off = cur + attrs.pos;
+        }
+        if !stack.is_empty() {
+            stack.push(("DlParentDev", cur));
+        }
+        (stack, None)
+    }
+}
 pub struct PushDevlink<Prev: Pusher> {
     pub(crate) prev: Option<Prev>,
     pub(crate) header_offset: Option<usize>,
@@ -14474,6 +14711,14 @@ impl<Prev: Pusher> PushDevlink<Prev> {
         push_header(self.as_vec_mut(), 185u16, 4 as u16);
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
+    }
+    #[doc = "Identifies the devlink instance which owns the parent rate node. Used\nwith rate-set and rate-new to parent a rate object to a node on a\ndifferent devlink instance, enabling cross-device rate scheduling. When\nabsent, the parent node is resolved on the same instance.\n"]
+    pub fn nested_parent_dev(mut self) -> PushDlParentDev<Self> {
+        let header_offset = push_nested_header(self.as_vec_mut(), 186u16);
+        PushDlParentDev {
+            prev: Some(self),
+            header_offset: Some(header_offset),
+        }
     }
 }
 impl<Prev: Pusher> Drop for PushDevlink<Prev> {
@@ -16485,6 +16730,78 @@ impl<Prev: Pusher> PushDlRateTcBws<Prev> {
     }
 }
 impl<Prev: Pusher> Drop for PushDlRateTcBws<Prev> {
+    fn drop(&mut self) {
+        if let Some(prev) = &mut self.prev {
+            if let Some(header_offset) = &self.header_offset {
+                finalize_nested_header(prev.as_vec_mut(), *header_offset);
+            }
+        }
+    }
+}
+pub struct PushDlParentDev<Prev: Pusher> {
+    pub(crate) prev: Option<Prev>,
+    pub(crate) header_offset: Option<usize>,
+}
+impl<Prev: Pusher> Pusher for PushDlParentDev<Prev> {
+    fn as_vec_mut(&mut self) -> &mut Vec<u8> {
+        self.prev.as_mut().unwrap().as_vec_mut()
+    }
+    fn as_vec(&self) -> &Vec<u8> {
+        self.prev.as_ref().unwrap().as_vec()
+    }
+}
+impl<Prev: Pusher> PushDlParentDev<Prev> {
+    pub fn new(prev: Prev) -> Self {
+        Self {
+            prev: Some(prev),
+            header_offset: None,
+        }
+    }
+    pub fn end_nested(mut self) -> Prev {
+        let mut prev = self.prev.take().unwrap();
+        if let Some(header_offset) = &self.header_offset {
+            finalize_nested_header(prev.as_vec_mut(), *header_offset);
+        }
+        prev
+    }
+    pub fn push_bus_name(mut self, value: &CStr) -> Self {
+        push_header(
+            self.as_vec_mut(),
+            1u16,
+            value.to_bytes_with_nul().len() as u16,
+        );
+        self.as_vec_mut().extend(value.to_bytes_with_nul());
+        self
+    }
+    pub fn push_bus_name_bytes(mut self, value: &[u8]) -> Self {
+        push_header(self.as_vec_mut(), 1u16, (value.len() + 1) as u16);
+        self.as_vec_mut().extend(value);
+        self.as_vec_mut().push(0);
+        self
+    }
+    pub fn push_dev_name(mut self, value: &CStr) -> Self {
+        push_header(
+            self.as_vec_mut(),
+            2u16,
+            value.to_bytes_with_nul().len() as u16,
+        );
+        self.as_vec_mut().extend(value.to_bytes_with_nul());
+        self
+    }
+    pub fn push_dev_name_bytes(mut self, value: &[u8]) -> Self {
+        push_header(self.as_vec_mut(), 2u16, (value.len() + 1) as u16);
+        self.as_vec_mut().extend(value);
+        self.as_vec_mut().push(0);
+        self
+    }
+    #[doc = "Unique devlink instance index.\n"]
+    pub fn push_index(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 184u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+}
+impl<Prev: Pusher> Drop for PushDlParentDev<Prev> {
     fn drop(&mut self) {
         if let Some(prev) = &mut self.prev {
             if let Some(header_offset) = &self.header_offset {
@@ -20494,7 +20811,7 @@ impl NetlinkRequest for OpRateGetDo<'_> {
         Self::decode_request(buf).lookup_attr(offset, missing_type)
     }
 }
-#[doc = "Set rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n\n"]
+#[doc = "Set rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n- [.nested_parent_dev()](PushDevlink::nested_parent_dev)\n\n"]
 #[derive(Debug)]
 pub struct OpRateSetDo<'r> {
     request: Request<'r>,
@@ -20555,7 +20872,7 @@ impl NetlinkRequest for OpRateSetDo<'_> {
         Self::decode_request(buf).lookup_attr(offset, missing_type)
     }
 }
-#[doc = "Create rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n\n"]
+#[doc = "Create rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n- [.nested_parent_dev()](PushDevlink::nested_parent_dev)\n\n"]
 #[derive(Debug)]
 pub struct OpRateNewDo<'r> {
     request: Request<'r>,
@@ -21782,14 +22099,14 @@ impl<'buf> Request<'buf> {
             .do_writeback(res.protocol(), "op-rate-get-do", OpRateGetDo::lookup);
         res
     }
-    #[doc = "Set rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n\n"]
+    #[doc = "Set rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n- [.nested_parent_dev()](PushDevlink::nested_parent_dev)\n\n"]
     pub fn op_rate_set_do(self) -> OpRateSetDo<'buf> {
         let mut res = OpRateSetDo::new(self);
         res.request
             .do_writeback(res.protocol(), "op-rate-set-do", OpRateSetDo::lookup);
         res
     }
-    #[doc = "Create rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n\n"]
+    #[doc = "Create rate instances.\n\nFlags: admin-perm\n\nRequest attributes:\n- [.push_bus_name()](PushDevlink::push_bus_name)\n- [.push_dev_name()](PushDevlink::push_dev_name)\n- [.push_rate_tx_share()](PushDevlink::push_rate_tx_share)\n- [.push_rate_tx_max()](PushDevlink::push_rate_tx_max)\n- [.push_rate_node_name()](PushDevlink::push_rate_node_name)\n- [.push_rate_parent_node_name()](PushDevlink::push_rate_parent_node_name)\n- [.push_rate_tx_priority()](PushDevlink::push_rate_tx_priority)\n- [.push_rate_tx_weight()](PushDevlink::push_rate_tx_weight)\n- [.nested_rate_tc_bws()](PushDevlink::nested_rate_tc_bws)\n- [.push_index()](PushDevlink::push_index)\n- [.nested_parent_dev()](PushDevlink::nested_parent_dev)\n\n"]
     pub fn op_rate_new_do(self) -> OpRateNewDo<'buf> {
         let mut res = OpRateNewDo::new(self);
         res.request
@@ -21913,6 +22230,7 @@ mod generated_tests {
         let _ = IterableDevlink::get_trap_group_name;
         let _ = IterableDevlink::get_trap_name;
         let _ = IterableDevlink::get_trap_policer_id;
+        let _ = PushDevlink::<&mut Vec<u8>>::nested_parent_dev;
         let _ = PushDevlink::<&mut Vec<u8>>::nested_port_function;
         let _ = PushDevlink::<&mut Vec<u8>>::nested_rate_tc_bws;
         let _ = PushDevlink::<&mut Vec<u8>>::nested_selftests;

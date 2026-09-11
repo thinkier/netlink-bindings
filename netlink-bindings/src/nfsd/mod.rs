@@ -4174,6 +4174,910 @@ impl IterableUnlockExport<'_> {
         (stack, None)
     }
 }
+#[derive(Clone)]
+pub enum ServerProcEntry<'a> {
+    Op(u32),
+    Count(u64),
+    Pad(&'a [u8]),
+}
+impl<'a> IterableServerProcEntry<'a> {
+    pub fn get_op(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerProcEntry::Op(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerProcEntry",
+            "Op",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_count(&self) -> Result<u64, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerProcEntry::Count(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerProcEntry",
+            "Count",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_pad(&self) -> Result<&'a [u8], ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerProcEntry::Pad(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerProcEntry",
+            "Pad",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+}
+impl ServerProcEntry<'_> {
+    pub fn new<'a>(buf: &'a [u8]) -> IterableServerProcEntry<'a> {
+        IterableServerProcEntry::with_loc(buf, buf.as_ptr() as usize)
+    }
+    fn attr_from_type(r#type: u16) -> Option<&'static str> {
+        let res = match r#type {
+            1u16 => "Op",
+            2u16 => "Count",
+            3u16 => "Pad",
+            _ => return None,
+        };
+        Some(res)
+    }
+}
+#[derive(Clone, Copy, Default)]
+pub struct IterableServerProcEntry<'a> {
+    buf: &'a [u8],
+    pos: usize,
+    orig_loc: usize,
+}
+impl<'a> IterableServerProcEntry<'a> {
+    fn with_loc(buf: &'a [u8], orig_loc: usize) -> Self {
+        Self {
+            buf,
+            pos: 0,
+            orig_loc,
+        }
+    }
+    pub fn get_buf(&self) -> &'a [u8] {
+        self.buf
+    }
+}
+impl<'a> Iterator for IterableServerProcEntry<'a> {
+    type Item = Result<ServerProcEntry<'a>, ErrorContext>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut pos;
+        let mut r#type;
+        loop {
+            pos = self.pos;
+            r#type = None;
+            if self.buf.len() == self.pos {
+                return None;
+            }
+            let Some((header, next)) = chop_header(self.buf, &mut self.pos) else {
+                self.pos = self.buf.len();
+                break;
+            };
+            r#type = Some(header.r#type);
+            let res = match header.r#type {
+                1u16 => ServerProcEntry::Op({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                2u16 => ServerProcEntry::Count({
+                    let res = parse_u64(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                3u16 => ServerProcEntry::Pad({
+                    let res = Some(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
+                n => continue,
+            };
+            return Some(Ok(res));
+        }
+        Some(Err(ErrorContext::new(
+            "ServerProcEntry",
+            r#type.and_then(|t| ServerProcEntry::attr_from_type(t)),
+            self.orig_loc,
+            self.buf.as_ptr().wrapping_add(pos) as usize,
+        )))
+    }
+}
+impl<'a> std::fmt::Debug for IterableServerProcEntry<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut fmt = f.debug_struct("ServerProcEntry");
+        let mut iter = IterableServerProcEntry::with_loc(&[], self.orig_loc);
+        for attr in IterateAttrs::new(self.get_buf()) {
+            iter.buf = attr;
+            iter.pos = 0;
+            let Some(attr) = iter.next() else {
+                fmt.field("Err", &FormatUnrecognized(attr));
+                continue;
+            };
+            let attr = match attr {
+                Ok(a) => a,
+                Err(err) => {
+                    fmt.finish()?;
+                    f.write_str("Err(")?;
+                    err.fmt(f)?;
+                    return f.write_str(")");
+                }
+            };
+            match attr {
+                ServerProcEntry::Op(val) => fmt.field("Op", &val),
+                ServerProcEntry::Count(val) => fmt.field("Count", &val),
+                ServerProcEntry::Pad(val) => fmt.field("Pad", &val),
+            };
+        }
+        fmt.finish()
+    }
+}
+impl IterableServerProcEntry<'_> {
+    pub fn lookup_attr(
+        &self,
+        offset: usize,
+        missing_type: Option<u16>,
+    ) -> (Vec<(&'static str, usize)>, Option<&'static str>) {
+        let mut stack = Vec::new();
+        let cur = ErrorContext::calc_offset(self.orig_loc, self.buf.as_ptr() as usize);
+        if missing_type.is_some() && cur == offset {
+            stack.push(("ServerProcEntry", offset));
+            return (
+                stack,
+                missing_type.and_then(|t| ServerProcEntry::attr_from_type(t)),
+            );
+        }
+        if cur > offset || cur + self.buf.len() < offset {
+            return (stack, None);
+        }
+        let mut attrs = self.clone();
+        let mut last_off = cur + attrs.pos;
+        while let Some(attr) = attrs.next() {
+            let Ok(attr) = attr else { break };
+            match attr {
+                ServerProcEntry::Op(val) => {
+                    if last_off == offset {
+                        stack.push(("Op", last_off));
+                        break;
+                    }
+                }
+                ServerProcEntry::Count(val) => {
+                    if last_off == offset {
+                        stack.push(("Count", last_off));
+                        break;
+                    }
+                }
+                ServerProcEntry::Pad(val) => {
+                    if last_off == offset {
+                        stack.push(("Pad", last_off));
+                        break;
+                    }
+                }
+                _ => {}
+            };
+            last_off = cur + attrs.pos;
+        }
+        if !stack.is_empty() {
+            stack.push(("ServerProcEntry", cur));
+        }
+        (stack, None)
+    }
+}
+#[derive(Clone)]
+pub enum ServerStats<'a> {
+    RcHits(u64),
+    RcMisses(u64),
+    RcNocache(u64),
+    Pad(&'a [u8]),
+    FhStale(u64),
+    IoRead(u64),
+    IoWrite(u64),
+    Netcnt(u32),
+    Netudpcnt(u32),
+    Nettcpcnt(u32),
+    Nettcpconn(u32),
+    Rpccnt(u32),
+    Rpcbadfmt(u32),
+    Rpcbadauth(u32),
+    Rpcbadclnt(u32),
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    Proc2Ops(IterableServerProcEntry<'a>),
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    Proc3Ops(IterableServerProcEntry<'a>),
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    Proc4Ops(IterableServerProcEntry<'a>),
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    Proc4opsOps(IterableServerProcEntry<'a>),
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    Proc4cbOps(IterableServerProcEntry<'a>),
+}
+impl<'a> IterableServerStats<'a> {
+    pub fn get_rc_hits(&self) -> Result<u64, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::RcHits(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "RcHits",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_rc_misses(&self) -> Result<u64, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::RcMisses(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "RcMisses",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_rc_nocache(&self) -> Result<u64, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::RcNocache(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "RcNocache",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_pad(&self) -> Result<&'a [u8], ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Pad(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Pad",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_fh_stale(&self) -> Result<u64, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::FhStale(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "FhStale",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_io_read(&self) -> Result<u64, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::IoRead(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "IoRead",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_io_write(&self) -> Result<u64, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::IoWrite(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "IoWrite",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_netcnt(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Netcnt(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Netcnt",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_netudpcnt(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Netudpcnt(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Netudpcnt",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_nettcpcnt(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Nettcpcnt(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Nettcpcnt",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_nettcpconn(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Nettcpconn(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Nettcpconn",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_rpccnt(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Rpccnt(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Rpccnt",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_rpcbadfmt(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Rpcbadfmt(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Rpcbadfmt",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_rpcbadauth(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Rpcbadauth(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Rpcbadauth",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    pub fn get_rpcbadclnt(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(ServerStats::Rpcbadclnt(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "ServerStats",
+            "Rpcbadclnt",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn get_proc2_ops(
+        &self,
+    ) -> MultiAttrIterable<Self, ServerStats<'a>, IterableServerProcEntry<'a>> {
+        MultiAttrIterable::new(self.clone(), |variant| {
+            if let ServerStats::Proc2Ops(val) = variant {
+                Some(val)
+            } else {
+                None
+            }
+        })
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn get_proc3_ops(
+        &self,
+    ) -> MultiAttrIterable<Self, ServerStats<'a>, IterableServerProcEntry<'a>> {
+        MultiAttrIterable::new(self.clone(), |variant| {
+            if let ServerStats::Proc3Ops(val) = variant {
+                Some(val)
+            } else {
+                None
+            }
+        })
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn get_proc4_ops(
+        &self,
+    ) -> MultiAttrIterable<Self, ServerStats<'a>, IterableServerProcEntry<'a>> {
+        MultiAttrIterable::new(self.clone(), |variant| {
+            if let ServerStats::Proc4Ops(val) = variant {
+                Some(val)
+            } else {
+                None
+            }
+        })
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn get_proc4ops_ops(
+        &self,
+    ) -> MultiAttrIterable<Self, ServerStats<'a>, IterableServerProcEntry<'a>> {
+        MultiAttrIterable::new(self.clone(), |variant| {
+            if let ServerStats::Proc4opsOps(val) = variant {
+                Some(val)
+            } else {
+                None
+            }
+        })
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn get_proc4cb_ops(
+        &self,
+    ) -> MultiAttrIterable<Self, ServerStats<'a>, IterableServerProcEntry<'a>> {
+        MultiAttrIterable::new(self.clone(), |variant| {
+            if let ServerStats::Proc4cbOps(val) = variant {
+                Some(val)
+            } else {
+                None
+            }
+        })
+    }
+}
+impl ServerStats<'_> {
+    pub fn new<'a>(buf: &'a [u8]) -> IterableServerStats<'a> {
+        IterableServerStats::with_loc(buf, buf.as_ptr() as usize)
+    }
+    fn attr_from_type(r#type: u16) -> Option<&'static str> {
+        let res = match r#type {
+            1u16 => "RcHits",
+            2u16 => "RcMisses",
+            3u16 => "RcNocache",
+            4u16 => "Pad",
+            5u16 => "FhStale",
+            6u16 => "IoRead",
+            7u16 => "IoWrite",
+            8u16 => "Netcnt",
+            9u16 => "Netudpcnt",
+            10u16 => "Nettcpcnt",
+            11u16 => "Nettcpconn",
+            12u16 => "Rpccnt",
+            13u16 => "Rpcbadfmt",
+            14u16 => "Rpcbadauth",
+            15u16 => "Rpcbadclnt",
+            16u16 => "Proc2Ops",
+            17u16 => "Proc3Ops",
+            18u16 => "Proc4Ops",
+            19u16 => "Proc4opsOps",
+            20u16 => "Proc4cbOps",
+            _ => return None,
+        };
+        Some(res)
+    }
+}
+#[derive(Clone, Copy, Default)]
+pub struct IterableServerStats<'a> {
+    buf: &'a [u8],
+    pos: usize,
+    orig_loc: usize,
+}
+impl<'a> IterableServerStats<'a> {
+    fn with_loc(buf: &'a [u8], orig_loc: usize) -> Self {
+        Self {
+            buf,
+            pos: 0,
+            orig_loc,
+        }
+    }
+    pub fn get_buf(&self) -> &'a [u8] {
+        self.buf
+    }
+}
+impl<'a> Iterator for IterableServerStats<'a> {
+    type Item = Result<ServerStats<'a>, ErrorContext>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut pos;
+        let mut r#type;
+        loop {
+            pos = self.pos;
+            r#type = None;
+            if self.buf.len() == self.pos {
+                return None;
+            }
+            let Some((header, next)) = chop_header(self.buf, &mut self.pos) else {
+                self.pos = self.buf.len();
+                break;
+            };
+            r#type = Some(header.r#type);
+            let res = match header.r#type {
+                1u16 => ServerStats::RcHits({
+                    let res = parse_u64(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                2u16 => ServerStats::RcMisses({
+                    let res = parse_u64(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                3u16 => ServerStats::RcNocache({
+                    let res = parse_u64(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                4u16 => ServerStats::Pad({
+                    let res = Some(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                5u16 => ServerStats::FhStale({
+                    let res = parse_u64(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                6u16 => ServerStats::IoRead({
+                    let res = parse_u64(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                7u16 => ServerStats::IoWrite({
+                    let res = parse_u64(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                8u16 => ServerStats::Netcnt({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                9u16 => ServerStats::Netudpcnt({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                10u16 => ServerStats::Nettcpcnt({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                11u16 => ServerStats::Nettcpconn({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                12u16 => ServerStats::Rpccnt({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                13u16 => ServerStats::Rpcbadfmt({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                14u16 => ServerStats::Rpcbadauth({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                15u16 => ServerStats::Rpcbadclnt({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                16u16 => ServerStats::Proc2Ops({
+                    let res = Some(IterableServerProcEntry::with_loc(next, self.orig_loc));
+                    let Some(val) = res else { break };
+                    val
+                }),
+                17u16 => ServerStats::Proc3Ops({
+                    let res = Some(IterableServerProcEntry::with_loc(next, self.orig_loc));
+                    let Some(val) = res else { break };
+                    val
+                }),
+                18u16 => ServerStats::Proc4Ops({
+                    let res = Some(IterableServerProcEntry::with_loc(next, self.orig_loc));
+                    let Some(val) = res else { break };
+                    val
+                }),
+                19u16 => ServerStats::Proc4opsOps({
+                    let res = Some(IterableServerProcEntry::with_loc(next, self.orig_loc));
+                    let Some(val) = res else { break };
+                    val
+                }),
+                20u16 => ServerStats::Proc4cbOps({
+                    let res = Some(IterableServerProcEntry::with_loc(next, self.orig_loc));
+                    let Some(val) = res else { break };
+                    val
+                }),
+                n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
+                n => continue,
+            };
+            return Some(Ok(res));
+        }
+        Some(Err(ErrorContext::new(
+            "ServerStats",
+            r#type.and_then(|t| ServerStats::attr_from_type(t)),
+            self.orig_loc,
+            self.buf.as_ptr().wrapping_add(pos) as usize,
+        )))
+    }
+}
+impl<'a> std::fmt::Debug for IterableServerStats<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut fmt = f.debug_struct("ServerStats");
+        let mut iter = IterableServerStats::with_loc(&[], self.orig_loc);
+        for attr in IterateAttrs::new(self.get_buf()) {
+            iter.buf = attr;
+            iter.pos = 0;
+            let Some(attr) = iter.next() else {
+                fmt.field("Err", &FormatUnrecognized(attr));
+                continue;
+            };
+            let attr = match attr {
+                Ok(a) => a,
+                Err(err) => {
+                    fmt.finish()?;
+                    f.write_str("Err(")?;
+                    err.fmt(f)?;
+                    return f.write_str(")");
+                }
+            };
+            match attr {
+                ServerStats::RcHits(val) => fmt.field("RcHits", &val),
+                ServerStats::RcMisses(val) => fmt.field("RcMisses", &val),
+                ServerStats::RcNocache(val) => fmt.field("RcNocache", &val),
+                ServerStats::Pad(val) => fmt.field("Pad", &val),
+                ServerStats::FhStale(val) => fmt.field("FhStale", &val),
+                ServerStats::IoRead(val) => fmt.field("IoRead", &val),
+                ServerStats::IoWrite(val) => fmt.field("IoWrite", &val),
+                ServerStats::Netcnt(val) => fmt.field("Netcnt", &val),
+                ServerStats::Netudpcnt(val) => fmt.field("Netudpcnt", &val),
+                ServerStats::Nettcpcnt(val) => fmt.field("Nettcpcnt", &val),
+                ServerStats::Nettcpconn(val) => fmt.field("Nettcpconn", &val),
+                ServerStats::Rpccnt(val) => fmt.field("Rpccnt", &val),
+                ServerStats::Rpcbadfmt(val) => fmt.field("Rpcbadfmt", &val),
+                ServerStats::Rpcbadauth(val) => fmt.field("Rpcbadauth", &val),
+                ServerStats::Rpcbadclnt(val) => fmt.field("Rpcbadclnt", &val),
+                ServerStats::Proc2Ops(val) => fmt.field("Proc2Ops", &val),
+                ServerStats::Proc3Ops(val) => fmt.field("Proc3Ops", &val),
+                ServerStats::Proc4Ops(val) => fmt.field("Proc4Ops", &val),
+                ServerStats::Proc4opsOps(val) => fmt.field("Proc4opsOps", &val),
+                ServerStats::Proc4cbOps(val) => fmt.field("Proc4cbOps", &val),
+            };
+        }
+        fmt.finish()
+    }
+}
+impl IterableServerStats<'_> {
+    pub fn lookup_attr(
+        &self,
+        offset: usize,
+        missing_type: Option<u16>,
+    ) -> (Vec<(&'static str, usize)>, Option<&'static str>) {
+        let mut stack = Vec::new();
+        let cur = ErrorContext::calc_offset(self.orig_loc, self.buf.as_ptr() as usize);
+        if missing_type.is_some() && cur == offset {
+            stack.push(("ServerStats", offset));
+            return (
+                stack,
+                missing_type.and_then(|t| ServerStats::attr_from_type(t)),
+            );
+        }
+        if cur > offset || cur + self.buf.len() < offset {
+            return (stack, None);
+        }
+        let mut attrs = self.clone();
+        let mut last_off = cur + attrs.pos;
+        let mut missing = None;
+        while let Some(attr) = attrs.next() {
+            let Ok(attr) = attr else { break };
+            match attr {
+                ServerStats::RcHits(val) => {
+                    if last_off == offset {
+                        stack.push(("RcHits", last_off));
+                        break;
+                    }
+                }
+                ServerStats::RcMisses(val) => {
+                    if last_off == offset {
+                        stack.push(("RcMisses", last_off));
+                        break;
+                    }
+                }
+                ServerStats::RcNocache(val) => {
+                    if last_off == offset {
+                        stack.push(("RcNocache", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Pad(val) => {
+                    if last_off == offset {
+                        stack.push(("Pad", last_off));
+                        break;
+                    }
+                }
+                ServerStats::FhStale(val) => {
+                    if last_off == offset {
+                        stack.push(("FhStale", last_off));
+                        break;
+                    }
+                }
+                ServerStats::IoRead(val) => {
+                    if last_off == offset {
+                        stack.push(("IoRead", last_off));
+                        break;
+                    }
+                }
+                ServerStats::IoWrite(val) => {
+                    if last_off == offset {
+                        stack.push(("IoWrite", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Netcnt(val) => {
+                    if last_off == offset {
+                        stack.push(("Netcnt", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Netudpcnt(val) => {
+                    if last_off == offset {
+                        stack.push(("Netudpcnt", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Nettcpcnt(val) => {
+                    if last_off == offset {
+                        stack.push(("Nettcpcnt", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Nettcpconn(val) => {
+                    if last_off == offset {
+                        stack.push(("Nettcpconn", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Rpccnt(val) => {
+                    if last_off == offset {
+                        stack.push(("Rpccnt", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Rpcbadfmt(val) => {
+                    if last_off == offset {
+                        stack.push(("Rpcbadfmt", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Rpcbadauth(val) => {
+                    if last_off == offset {
+                        stack.push(("Rpcbadauth", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Rpcbadclnt(val) => {
+                    if last_off == offset {
+                        stack.push(("Rpcbadclnt", last_off));
+                        break;
+                    }
+                }
+                ServerStats::Proc2Ops(val) => {
+                    (stack, missing) = val.lookup_attr(offset, missing_type);
+                    if !stack.is_empty() {
+                        break;
+                    }
+                }
+                ServerStats::Proc3Ops(val) => {
+                    (stack, missing) = val.lookup_attr(offset, missing_type);
+                    if !stack.is_empty() {
+                        break;
+                    }
+                }
+                ServerStats::Proc4Ops(val) => {
+                    (stack, missing) = val.lookup_attr(offset, missing_type);
+                    if !stack.is_empty() {
+                        break;
+                    }
+                }
+                ServerStats::Proc4opsOps(val) => {
+                    (stack, missing) = val.lookup_attr(offset, missing_type);
+                    if !stack.is_empty() {
+                        break;
+                    }
+                }
+                ServerStats::Proc4cbOps(val) => {
+                    (stack, missing) = val.lookup_attr(offset, missing_type);
+                    if !stack.is_empty() {
+                        break;
+                    }
+                }
+                _ => {}
+            };
+            last_off = cur + attrs.pos;
+        }
+        if !stack.is_empty() {
+            stack.push(("ServerStats", cur));
+        }
+        (stack, missing)
+    }
+}
 pub struct PushCacheNotify<Prev: Pusher> {
     pub(crate) prev: Option<Prev>,
     pub(crate) header_offset: Option<usize>,
@@ -5302,6 +6206,208 @@ impl<Prev: Pusher> Drop for PushUnlockExport<Prev> {
         }
     }
 }
+pub struct PushServerProcEntry<Prev: Pusher> {
+    pub(crate) prev: Option<Prev>,
+    pub(crate) header_offset: Option<usize>,
+}
+impl<Prev: Pusher> Pusher for PushServerProcEntry<Prev> {
+    fn as_vec_mut(&mut self) -> &mut Vec<u8> {
+        self.prev.as_mut().unwrap().as_vec_mut()
+    }
+    fn as_vec(&self) -> &Vec<u8> {
+        self.prev.as_ref().unwrap().as_vec()
+    }
+}
+impl<Prev: Pusher> PushServerProcEntry<Prev> {
+    pub fn new(prev: Prev) -> Self {
+        Self {
+            prev: Some(prev),
+            header_offset: None,
+        }
+    }
+    pub fn end_nested(mut self) -> Prev {
+        let mut prev = self.prev.take().unwrap();
+        if let Some(header_offset) = &self.header_offset {
+            finalize_nested_header(prev.as_vec_mut(), *header_offset);
+        }
+        prev
+    }
+    pub fn push_op(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 1u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_count(mut self, value: u64) -> Self {
+        push_header(self.as_vec_mut(), 2u16, 8 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_pad(mut self, value: &[u8]) -> Self {
+        push_header(self.as_vec_mut(), 3u16, value.len() as u16);
+        self.as_vec_mut().extend(value);
+        self
+    }
+}
+impl<Prev: Pusher> Drop for PushServerProcEntry<Prev> {
+    fn drop(&mut self) {
+        if let Some(prev) = &mut self.prev {
+            if let Some(header_offset) = &self.header_offset {
+                finalize_nested_header(prev.as_vec_mut(), *header_offset);
+            }
+        }
+    }
+}
+pub struct PushServerStats<Prev: Pusher> {
+    pub(crate) prev: Option<Prev>,
+    pub(crate) header_offset: Option<usize>,
+}
+impl<Prev: Pusher> Pusher for PushServerStats<Prev> {
+    fn as_vec_mut(&mut self) -> &mut Vec<u8> {
+        self.prev.as_mut().unwrap().as_vec_mut()
+    }
+    fn as_vec(&self) -> &Vec<u8> {
+        self.prev.as_ref().unwrap().as_vec()
+    }
+}
+impl<Prev: Pusher> PushServerStats<Prev> {
+    pub fn new(prev: Prev) -> Self {
+        Self {
+            prev: Some(prev),
+            header_offset: None,
+        }
+    }
+    pub fn end_nested(mut self) -> Prev {
+        let mut prev = self.prev.take().unwrap();
+        if let Some(header_offset) = &self.header_offset {
+            finalize_nested_header(prev.as_vec_mut(), *header_offset);
+        }
+        prev
+    }
+    pub fn push_rc_hits(mut self, value: u64) -> Self {
+        push_header(self.as_vec_mut(), 1u16, 8 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_rc_misses(mut self, value: u64) -> Self {
+        push_header(self.as_vec_mut(), 2u16, 8 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_rc_nocache(mut self, value: u64) -> Self {
+        push_header(self.as_vec_mut(), 3u16, 8 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_pad(mut self, value: &[u8]) -> Self {
+        push_header(self.as_vec_mut(), 4u16, value.len() as u16);
+        self.as_vec_mut().extend(value);
+        self
+    }
+    pub fn push_fh_stale(mut self, value: u64) -> Self {
+        push_header(self.as_vec_mut(), 5u16, 8 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_io_read(mut self, value: u64) -> Self {
+        push_header(self.as_vec_mut(), 6u16, 8 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_io_write(mut self, value: u64) -> Self {
+        push_header(self.as_vec_mut(), 7u16, 8 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_netcnt(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 8u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_netudpcnt(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 9u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_nettcpcnt(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 10u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_nettcpconn(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 11u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_rpccnt(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 12u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_rpcbadfmt(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 13u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_rpcbadauth(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 14u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_rpcbadclnt(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 15u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn nested_proc2_ops(mut self) -> PushServerProcEntry<Self> {
+        let header_offset = push_nested_header(self.as_vec_mut(), 16u16);
+        PushServerProcEntry {
+            prev: Some(self),
+            header_offset: Some(header_offset),
+        }
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn nested_proc3_ops(mut self) -> PushServerProcEntry<Self> {
+        let header_offset = push_nested_header(self.as_vec_mut(), 17u16);
+        PushServerProcEntry {
+            prev: Some(self),
+            header_offset: Some(header_offset),
+        }
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn nested_proc4_ops(mut self) -> PushServerProcEntry<Self> {
+        let header_offset = push_nested_header(self.as_vec_mut(), 18u16);
+        PushServerProcEntry {
+            prev: Some(self),
+            header_offset: Some(header_offset),
+        }
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn nested_proc4ops_ops(mut self) -> PushServerProcEntry<Self> {
+        let header_offset = push_nested_header(self.as_vec_mut(), 19u16);
+        PushServerProcEntry {
+            prev: Some(self),
+            header_offset: Some(header_offset),
+        }
+    }
+    #[doc = "Attribute may repeat multiple times (treat it as array)"]
+    pub fn nested_proc4cb_ops(mut self) -> PushServerProcEntry<Self> {
+        let header_offset = push_nested_header(self.as_vec_mut(), 20u16);
+        PushServerProcEntry {
+            prev: Some(self),
+            header_offset: Some(header_offset),
+        }
+    }
+}
+impl<Prev: Pusher> Drop for PushServerStats<Prev> {
+    fn drop(&mut self) {
+        if let Some(prev) = &mut self.prev {
+            if let Some(header_offset) = &self.header_offset {
+                finalize_nested_header(prev.as_vec_mut(), *header_offset);
+            }
+        }
+    }
+}
 #[doc = "Notify attributes:\n- [`.get_cache_type()`](IterableCacheNotify::get_cache_type)\n"]
 #[derive(Debug)]
 pub struct OpCacheNotifyNotif;
@@ -6364,6 +7470,69 @@ impl NetlinkRequest for OpUnlockExportDo<'_> {
         Self::decode_request(buf).lookup_attr(offset, missing_type)
     }
 }
+#[doc = "dump NFS server statistics\n\nReply attributes:\n- [.get_rc_hits()](IterableServerStats::get_rc_hits)\n- [.get_rc_misses()](IterableServerStats::get_rc_misses)\n- [.get_rc_nocache()](IterableServerStats::get_rc_nocache)\n- [.get_fh_stale()](IterableServerStats::get_fh_stale)\n- [.get_io_read()](IterableServerStats::get_io_read)\n- [.get_io_write()](IterableServerStats::get_io_write)\n- [.get_netcnt()](IterableServerStats::get_netcnt)\n- [.get_netudpcnt()](IterableServerStats::get_netudpcnt)\n- [.get_nettcpcnt()](IterableServerStats::get_nettcpcnt)\n- [.get_nettcpconn()](IterableServerStats::get_nettcpconn)\n- [.get_rpccnt()](IterableServerStats::get_rpccnt)\n- [.get_rpcbadfmt()](IterableServerStats::get_rpcbadfmt)\n- [.get_rpcbadauth()](IterableServerStats::get_rpcbadauth)\n- [.get_rpcbadclnt()](IterableServerStats::get_rpcbadclnt)\n- [.get_proc2_ops()](IterableServerStats::get_proc2_ops)\n- [.get_proc3_ops()](IterableServerStats::get_proc3_ops)\n- [.get_proc4_ops()](IterableServerStats::get_proc4_ops)\n- [.get_proc4ops_ops()](IterableServerStats::get_proc4ops_ops)\n- [.get_proc4cb_ops()](IterableServerStats::get_proc4cb_ops)\n\n"]
+#[derive(Debug)]
+pub struct OpServerStatsGetDump<'r> {
+    request: Request<'r>,
+}
+impl<'r> OpServerStatsGetDump<'r> {
+    pub fn new(mut request: Request<'r>) -> Self {
+        Self::write_header(request.buf_mut());
+        Self {
+            request: request.set_dump(),
+        }
+    }
+    pub fn encode_request<'buf>(buf: &'buf mut Vec<u8>) -> PushServerStats<&'buf mut Vec<u8>> {
+        Self::write_header(buf);
+        PushServerStats::new(buf)
+    }
+    pub fn encode(&mut self) -> PushServerStats<&mut Vec<u8>> {
+        PushServerStats::new(self.request.buf_mut())
+    }
+    pub fn into_encoder(self) -> PushServerStats<RequestBuf<'r>> {
+        PushServerStats::new(self.request.buf)
+    }
+    pub fn decode_request<'a>(buf: &'a [u8]) -> IterableServerStats<'a> {
+        let (_header, attrs) = buf.split_at(buf.len().min(BuiltinNfgenmsg::len()));
+        IterableServerStats::with_loc(attrs, buf.as_ptr() as usize)
+    }
+    fn write_header<Prev: Pusher>(prev: &mut Prev) {
+        let mut header = BuiltinNfgenmsg::new();
+        header.cmd = 19u8;
+        header.version = 1u8;
+        prev.as_vec_mut().extend(header.as_slice());
+    }
+    pub fn header(&self) -> &BuiltinNfgenmsg {
+        let pos = self.request.pos;
+        BuiltinNfgenmsg::from_slice(&self.request.buf()[pos..])
+    }
+    pub fn header_mut(&mut self) -> &mut BuiltinNfgenmsg {
+        let pos = self.request.pos;
+        BuiltinNfgenmsg::from_slice_mut(&mut self.request.buf_mut()[pos..])
+    }
+}
+impl NetlinkRequest for OpServerStatsGetDump<'_> {
+    fn protocol(&self) -> Protocol {
+        Protocol::Generic("nfsd".as_bytes())
+    }
+    fn flags(&self) -> u16 {
+        self.request.flags
+    }
+    fn payload(&self) -> &[u8] {
+        self.request.buf()
+    }
+    type ReplyType<'buf> = IterableServerStats<'buf>;
+    fn decode_reply<'buf>(buf: &'buf [u8]) -> Self::ReplyType<'buf> {
+        Self::decode_request(buf)
+    }
+    fn lookup(
+        buf: &[u8],
+        offset: usize,
+        missing_type: Option<u16>,
+    ) -> (Vec<(&'static str, usize)>, Option<&'static str>) {
+        Self::decode_request(buf).lookup_attr(offset, missing_type)
+    }
+}
 use crate::traits::LookupFn;
 use crate::utils::RequestBuf;
 #[derive(Debug)]
@@ -6624,6 +7793,16 @@ impl<'buf> Request<'buf> {
         );
         res
     }
+    #[doc = "dump NFS server statistics\n\nReply attributes:\n- [.get_rc_hits()](IterableServerStats::get_rc_hits)\n- [.get_rc_misses()](IterableServerStats::get_rc_misses)\n- [.get_rc_nocache()](IterableServerStats::get_rc_nocache)\n- [.get_fh_stale()](IterableServerStats::get_fh_stale)\n- [.get_io_read()](IterableServerStats::get_io_read)\n- [.get_io_write()](IterableServerStats::get_io_write)\n- [.get_netcnt()](IterableServerStats::get_netcnt)\n- [.get_netudpcnt()](IterableServerStats::get_netudpcnt)\n- [.get_nettcpcnt()](IterableServerStats::get_nettcpcnt)\n- [.get_nettcpconn()](IterableServerStats::get_nettcpconn)\n- [.get_rpccnt()](IterableServerStats::get_rpccnt)\n- [.get_rpcbadfmt()](IterableServerStats::get_rpcbadfmt)\n- [.get_rpcbadauth()](IterableServerStats::get_rpcbadauth)\n- [.get_rpcbadclnt()](IterableServerStats::get_rpcbadclnt)\n- [.get_proc2_ops()](IterableServerStats::get_proc2_ops)\n- [.get_proc3_ops()](IterableServerStats::get_proc3_ops)\n- [.get_proc4_ops()](IterableServerStats::get_proc4_ops)\n- [.get_proc4ops_ops()](IterableServerStats::get_proc4ops_ops)\n- [.get_proc4cb_ops()](IterableServerStats::get_proc4cb_ops)\n\n"]
+    pub fn op_server_stats_get_dump(self) -> OpServerStatsGetDump<'buf> {
+        let mut res = OpServerStatsGetDump::new(self);
+        res.request.do_writeback(
+            res.protocol(),
+            "op-server-stats-get-dump",
+            OpServerStatsGetDump::lookup,
+        );
+        res
+    }
 }
 #[cfg(test)]
 mod generated_tests {
@@ -6654,6 +7833,25 @@ mod generated_tests {
         let _ = IterableServer::get_threads;
         let _ = IterableServerProto::get_version;
         let _ = IterableServerSock::get_addr;
+        let _ = IterableServerStats::get_fh_stale;
+        let _ = IterableServerStats::get_io_read;
+        let _ = IterableServerStats::get_io_write;
+        let _ = IterableServerStats::get_netcnt;
+        let _ = IterableServerStats::get_nettcpcnt;
+        let _ = IterableServerStats::get_nettcpconn;
+        let _ = IterableServerStats::get_netudpcnt;
+        let _ = IterableServerStats::get_proc2_ops;
+        let _ = IterableServerStats::get_proc3_ops;
+        let _ = IterableServerStats::get_proc4_ops;
+        let _ = IterableServerStats::get_proc4cb_ops;
+        let _ = IterableServerStats::get_proc4ops_ops;
+        let _ = IterableServerStats::get_rc_hits;
+        let _ = IterableServerStats::get_rc_misses;
+        let _ = IterableServerStats::get_rc_nocache;
+        let _ = IterableServerStats::get_rpcbadauth;
+        let _ = IterableServerStats::get_rpcbadclnt;
+        let _ = IterableServerStats::get_rpcbadfmt;
+        let _ = IterableServerStats::get_rpccnt;
         let _ = IterableSvcExportReqs::get_requests;
         let _ = OpCacheNotifyNotif;
         let _ = PushCacheFlush::<&mut Vec<u8>>::push_mask;

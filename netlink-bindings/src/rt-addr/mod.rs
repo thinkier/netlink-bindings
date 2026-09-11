@@ -221,6 +221,7 @@ pub enum AddrAttrs<'a> {
     RtPriority(u32),
     TargetNetnsid(&'a [u8]),
     Proto(u8),
+    McUsers(u32),
 }
 impl<'a> IterableAddrAttrs<'a> {
     pub fn get_address(&self) -> Result<std::net::IpAddr, ErrorContext> {
@@ -389,6 +390,21 @@ impl<'a> IterableAddrAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
+    pub fn get_mc_users(&self) -> Result<u32, ErrorContext> {
+        let mut iter = self.clone();
+        iter.pos = 0;
+        for attr in iter {
+            if let Ok(AddrAttrs::McUsers(val)) = attr {
+                return Ok(val);
+            }
+        }
+        Err(ErrorContext::new_missing(
+            "AddrAttrs",
+            "McUsers",
+            self.orig_loc,
+            self.buf.as_ptr() as usize,
+        ))
+    }
 }
 impl AddrAttrs<'_> {
     pub fn new<'a>(buf: &'a [u8]) -> IterableAddrAttrs<'a> {
@@ -407,6 +423,7 @@ impl AddrAttrs<'_> {
             9u16 => "RtPriority",
             10u16 => "TargetNetnsid",
             11u16 => "Proto",
+            12u16 => "McUsers",
             _ => return None,
         };
         Some(res)
@@ -502,6 +519,11 @@ impl<'a> Iterator for IterableAddrAttrs<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
+                12u16 => AddrAttrs::McUsers({
+                    let res = parse_u32(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
                 n => continue,
             };
@@ -549,6 +571,7 @@ impl<'a> std::fmt::Debug for IterableAddrAttrs<'_> {
                 AddrAttrs::RtPriority(val) => fmt.field("RtPriority", &val),
                 AddrAttrs::TargetNetnsid(val) => fmt.field("TargetNetnsid", &FormatHexdump(val)),
                 AddrAttrs::Proto(val) => fmt.field("Proto", &val),
+                AddrAttrs::McUsers(val) => fmt.field("McUsers", &val),
             };
         }
         fmt.finish()
@@ -640,6 +663,12 @@ impl IterableAddrAttrs<'_> {
                 AddrAttrs::Proto(val) => {
                     if last_off == offset {
                         stack.push(("Proto", last_off));
+                        break;
+                    }
+                }
+                AddrAttrs::McUsers(val) => {
+                    if last_off == offset {
+                        stack.push(("McUsers", last_off));
                         break;
                     }
                 }
@@ -762,6 +791,11 @@ impl<Prev: Pusher> PushAddrAttrs<Prev> {
     }
     pub fn push_proto(mut self, value: u8) -> Self {
         push_header(self.as_vec_mut(), 11u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
+        self
+    }
+    pub fn push_mc_users(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 12u16, 4 as u16);
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
@@ -984,7 +1018,7 @@ impl NetlinkRequest for OpGetaddrDump<'_> {
             .lookup_attr(offset, missing_type)
     }
 }
-#[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n\n"]
+#[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n- [.get_mc_users()](IterableAddrAttrs::get_mc_users)\n\n"]
 #[derive(Debug)]
 pub struct OpGetmulticastDump<'r> {
     request: Request<'r>,
@@ -1055,7 +1089,7 @@ impl NetlinkRequest for OpGetmulticastDump<'_> {
             .lookup_attr(offset, missing_type)
     }
 }
-#[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n\n"]
+#[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n- [.get_mc_users()](IterableAddrAttrs::get_mc_users)\n\n"]
 #[derive(Debug)]
 pub struct OpGetmulticastDo<'r> {
     request: Request<'r>,
@@ -1394,7 +1428,7 @@ impl<'buf> Request<'buf> {
             .do_writeback(res.protocol(), "op-getaddr-dump", OpGetaddrDump::lookup);
         res
     }
-    #[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n\n"]
+    #[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n- [.get_mc_users()](IterableAddrAttrs::get_mc_users)\n\n"]
     pub fn op_getmulticast_dump(self, header: &Ifaddrmsg) -> OpGetmulticastDump<'buf> {
         let mut res = OpGetmulticastDump::new(self, header);
         res.request.do_writeback(
@@ -1404,7 +1438,7 @@ impl<'buf> Request<'buf> {
         );
         res
     }
-    #[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n\n"]
+    #[doc = "Get / dump IPv4/IPv6 multicast addresses.\n\nReply attributes:\n- [.get_cacheinfo()](IterableAddrAttrs::get_cacheinfo)\n- [.get_multicast()](IterableAddrAttrs::get_multicast)\n- [.get_mc_users()](IterableAddrAttrs::get_mc_users)\n\n"]
     pub fn op_getmulticast_do(self, header: &Ifaddrmsg) -> OpGetmulticastDo<'buf> {
         let mut res = OpGetmulticastDo::new(self, header);
         res.request.do_writeback(
@@ -1424,6 +1458,7 @@ mod generated_tests {
         let _ = IterableAddrAttrs::get_cacheinfo;
         let _ = IterableAddrAttrs::get_label;
         let _ = IterableAddrAttrs::get_local;
+        let _ = IterableAddrAttrs::get_mc_users;
         let _ = IterableAddrAttrs::get_multicast;
         let _ = PushAddrAttrs::<&mut Vec<u8>>::push_address;
         let _ = PushAddrAttrs::<&mut Vec<u8>>::push_cacheinfo;

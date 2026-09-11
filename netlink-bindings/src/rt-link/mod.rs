@@ -2302,6 +2302,7 @@ pub enum LinkAttrs<'a> {
     NetNsPid(u32),
     Ifalias(&'a CStr),
     NumVf(u32),
+    #[doc = "Per-VF details. The list holds at most 256 VFs, or 128 when statistics\nare included, because it is one attribute and has to fit in a u16\nlength. A device with more VFs than that reports a truncated list;\nnum-vf still carries the real count.\n"]
     VfinfoList(IterableVfinfoListAttrs<'a>),
     Stats64(RtnlLinkStats64),
     VfPorts(IterableVfPortsAttrs<'a>),
@@ -2641,6 +2642,7 @@ impl<'a> IterableLinkAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
+    #[doc = "Per-VF details. The list holds at most 256 VFs, or 128 when statistics\nare included, because it is one attribute and has to fit in a u16\nlength. A device with more VFs than that reports a truncated list;\nnum-vf still carries the real count.\n"]
     pub fn get_vfinfo_list(&self) -> Result<IterableVfinfoListAttrs<'a>, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
@@ -6390,6 +6392,9 @@ impl<'a> Iterator for IterableLinkinfoAttrs<'a> {
                 n if cfg!(any(test, feature = "deny-unknown-attrs")) => break,
                 n => continue,
             };
+            if let LinkinfoAttrs::Kind(sel) = &res {
+                self.selector_kind = Some(sel.to_bytes());
+            }
             if let LinkinfoAttrs::SlaveKind(sel) = &res {
                 self.selector_slave_kind = Some(sel.to_bytes());
             }
@@ -9965,15 +9970,15 @@ pub enum LinkinfoBrportAttrs<'a> {
     State(u8),
     Priority(u16),
     Cost(u32),
-    Mode(()),
-    Guard(()),
-    Protect(()),
-    FastLeave(()),
-    Learning(()),
-    UnicastFlood(()),
-    Proxyarp(()),
-    LearningSync(()),
-    ProxyarpWifi(()),
+    Mode(u8),
+    Guard(u8),
+    Protect(u8),
+    FastLeave(u8),
+    Learning(u8),
+    UnicastFlood(u8),
+    Proxyarp(u8),
+    LearningSync(u8),
+    ProxyarpWifi(u8),
     RootId(IflaBridgeId),
     BridgeId(IflaBridgeId),
     DesignatedPort(u16),
@@ -9988,23 +9993,23 @@ pub enum LinkinfoBrportAttrs<'a> {
     Flush(()),
     MulticastRouter(u8),
     Pad(&'a [u8]),
-    McastFlood(()),
-    McastToUcast(()),
-    VlanTunnel(()),
-    BcastFlood(()),
+    McastFlood(u8),
+    McastToUcast(u8),
+    VlanTunnel(u8),
+    BcastFlood(u8),
     GroupFwdMask(u16),
-    NeighSuppress(()),
-    Isolated(()),
+    NeighSuppress(u8),
+    Isolated(u8),
     BackupPort(u32),
-    MrpRingOpen(()),
-    MrpInOpen(()),
+    MrpRingOpen(u8),
+    MrpInOpen(u8),
     McastEhtHostsLimit(u32),
     McastEhtHostsCnt(u32),
-    Locked(()),
-    Mab(()),
+    Locked(u8),
+    Mab(u8),
     McastNGroups(u32),
     McastMaxGroups(u32),
-    NeighVlanSuppress(()),
+    NeighVlanSuppress(u8),
     BackupNhid(u32),
     NeighForwardGrat(u8),
 }
@@ -10054,7 +10059,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_mode(&self) -> Result<(), ErrorContext> {
+    pub fn get_mode(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10069,7 +10074,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_guard(&self) -> Result<(), ErrorContext> {
+    pub fn get_guard(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10084,7 +10089,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_protect(&self) -> Result<(), ErrorContext> {
+    pub fn get_protect(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10099,7 +10104,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_fast_leave(&self) -> Result<(), ErrorContext> {
+    pub fn get_fast_leave(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10114,7 +10119,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_learning(&self) -> Result<(), ErrorContext> {
+    pub fn get_learning(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10129,7 +10134,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_unicast_flood(&self) -> Result<(), ErrorContext> {
+    pub fn get_unicast_flood(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10144,7 +10149,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_proxyarp(&self) -> Result<(), ErrorContext> {
+    pub fn get_proxyarp(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10159,7 +10164,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_learning_sync(&self) -> Result<(), ErrorContext> {
+    pub fn get_learning_sync(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10174,7 +10179,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_proxyarp_wifi(&self) -> Result<(), ErrorContext> {
+    pub fn get_proxyarp_wifi(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10399,7 +10404,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_mcast_flood(&self) -> Result<(), ErrorContext> {
+    pub fn get_mcast_flood(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10414,7 +10419,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_mcast_to_ucast(&self) -> Result<(), ErrorContext> {
+    pub fn get_mcast_to_ucast(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10429,7 +10434,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_vlan_tunnel(&self) -> Result<(), ErrorContext> {
+    pub fn get_vlan_tunnel(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10444,7 +10449,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_bcast_flood(&self) -> Result<(), ErrorContext> {
+    pub fn get_bcast_flood(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10474,7 +10479,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_neigh_suppress(&self) -> Result<(), ErrorContext> {
+    pub fn get_neigh_suppress(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10489,7 +10494,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_isolated(&self) -> Result<(), ErrorContext> {
+    pub fn get_isolated(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10519,7 +10524,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_mrp_ring_open(&self) -> Result<(), ErrorContext> {
+    pub fn get_mrp_ring_open(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10534,7 +10539,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_mrp_in_open(&self) -> Result<(), ErrorContext> {
+    pub fn get_mrp_in_open(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10579,7 +10584,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_locked(&self) -> Result<(), ErrorContext> {
+    pub fn get_locked(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10594,7 +10599,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_mab(&self) -> Result<(), ErrorContext> {
+    pub fn get_mab(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10639,7 +10644,7 @@ impl<'a> IterableLinkinfoBrportAttrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_neigh_vlan_suppress(&self) -> Result<(), ErrorContext> {
+    pub fn get_neigh_vlan_suppress(&self) -> Result<u8, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -10791,15 +10796,51 @@ impl<'a> Iterator for IterableLinkinfoBrportAttrs<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
-                4u16 => LinkinfoBrportAttrs::Mode(()),
-                5u16 => LinkinfoBrportAttrs::Guard(()),
-                6u16 => LinkinfoBrportAttrs::Protect(()),
-                7u16 => LinkinfoBrportAttrs::FastLeave(()),
-                8u16 => LinkinfoBrportAttrs::Learning(()),
-                9u16 => LinkinfoBrportAttrs::UnicastFlood(()),
-                10u16 => LinkinfoBrportAttrs::Proxyarp(()),
-                11u16 => LinkinfoBrportAttrs::LearningSync(()),
-                12u16 => LinkinfoBrportAttrs::ProxyarpWifi(()),
+                4u16 => LinkinfoBrportAttrs::Mode({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                5u16 => LinkinfoBrportAttrs::Guard({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                6u16 => LinkinfoBrportAttrs::Protect({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                7u16 => LinkinfoBrportAttrs::FastLeave({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                8u16 => LinkinfoBrportAttrs::Learning({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                9u16 => LinkinfoBrportAttrs::UnicastFlood({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                10u16 => LinkinfoBrportAttrs::Proxyarp({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                11u16 => LinkinfoBrportAttrs::LearningSync({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                12u16 => LinkinfoBrportAttrs::ProxyarpWifi({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 13u16 => LinkinfoBrportAttrs::RootId({
                     let res = Some(IflaBridgeId::new_from_zeroed(next));
                     let Some(val) = res else { break };
@@ -10866,24 +10907,56 @@ impl<'a> Iterator for IterableLinkinfoBrportAttrs<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
-                27u16 => LinkinfoBrportAttrs::McastFlood(()),
-                28u16 => LinkinfoBrportAttrs::McastToUcast(()),
-                29u16 => LinkinfoBrportAttrs::VlanTunnel(()),
-                30u16 => LinkinfoBrportAttrs::BcastFlood(()),
+                27u16 => LinkinfoBrportAttrs::McastFlood({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                28u16 => LinkinfoBrportAttrs::McastToUcast({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                29u16 => LinkinfoBrportAttrs::VlanTunnel({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                30u16 => LinkinfoBrportAttrs::BcastFlood({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 31u16 => LinkinfoBrportAttrs::GroupFwdMask({
                     let res = parse_u16(next);
                     let Some(val) = res else { break };
                     val
                 }),
-                32u16 => LinkinfoBrportAttrs::NeighSuppress(()),
-                33u16 => LinkinfoBrportAttrs::Isolated(()),
+                32u16 => LinkinfoBrportAttrs::NeighSuppress({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                33u16 => LinkinfoBrportAttrs::Isolated({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 34u16 => LinkinfoBrportAttrs::BackupPort({
                     let res = parse_u32(next);
                     let Some(val) = res else { break };
                     val
                 }),
-                35u16 => LinkinfoBrportAttrs::MrpRingOpen(()),
-                36u16 => LinkinfoBrportAttrs::MrpInOpen(()),
+                35u16 => LinkinfoBrportAttrs::MrpRingOpen({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                36u16 => LinkinfoBrportAttrs::MrpInOpen({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 37u16 => LinkinfoBrportAttrs::McastEhtHostsLimit({
                     let res = parse_u32(next);
                     let Some(val) = res else { break };
@@ -10894,8 +10967,16 @@ impl<'a> Iterator for IterableLinkinfoBrportAttrs<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
-                39u16 => LinkinfoBrportAttrs::Locked(()),
-                40u16 => LinkinfoBrportAttrs::Mab(()),
+                39u16 => LinkinfoBrportAttrs::Locked({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
+                40u16 => LinkinfoBrportAttrs::Mab({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 41u16 => LinkinfoBrportAttrs::McastNGroups({
                     let res = parse_u32(next);
                     let Some(val) = res else { break };
@@ -10906,7 +10987,11 @@ impl<'a> Iterator for IterableLinkinfoBrportAttrs<'a> {
                     let Some(val) = res else { break };
                     val
                 }),
-                43u16 => LinkinfoBrportAttrs::NeighVlanSuppress(()),
+                43u16 => LinkinfoBrportAttrs::NeighVlanSuppress({
+                    let res = parse_u8(next);
+                    let Some(val) = res else { break };
+                    val
+                }),
                 44u16 => LinkinfoBrportAttrs::BackupNhid({
                     let res = parse_u32(next);
                     let Some(val) = res else { break };
@@ -19268,6 +19353,7 @@ impl<Prev: Pusher> PushLinkAttrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
+    #[doc = "Per-VF details. The list holds at most 256 VFs, or 128 when statistics\nare included, because it is one attribute and has to fit in a u16\nlength. A device with more VFs than that reports a truncated list;\nnum-vf still carries the real count.\n"]
     pub fn nested_vfinfo_list(mut self) -> PushVfinfoListAttrs<Self> {
         let header_offset = push_nested_header(self.as_vec_mut(), 22u16);
         PushVfinfoListAttrs {
@@ -21163,40 +21249,49 @@ impl<Prev: Pusher> PushLinkinfoBrportAttrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_mode(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 4u16, 0 as u16);
+    pub fn push_mode(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 4u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_guard(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 5u16, 0 as u16);
+    pub fn push_guard(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 5u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_protect(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 6u16, 0 as u16);
+    pub fn push_protect(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 6u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_fast_leave(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 7u16, 0 as u16);
+    pub fn push_fast_leave(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 7u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_learning(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 8u16, 0 as u16);
+    pub fn push_learning(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 8u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_unicast_flood(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 9u16, 0 as u16);
+    pub fn push_unicast_flood(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 9u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_proxyarp(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 10u16, 0 as u16);
+    pub fn push_proxyarp(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 10u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_learning_sync(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 11u16, 0 as u16);
+    pub fn push_learning_sync(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 11u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_proxyarp_wifi(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 12u16, 0 as u16);
+    pub fn push_proxyarp_wifi(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 12u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
     pub fn push_root_id(mut self, value: IflaBridgeId) -> Self {
@@ -21268,20 +21363,24 @@ impl<Prev: Pusher> PushLinkinfoBrportAttrs<Prev> {
         self.as_vec_mut().extend(value);
         self
     }
-    pub fn push_mcast_flood(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 27u16, 0 as u16);
+    pub fn push_mcast_flood(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 27u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_mcast_to_ucast(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 28u16, 0 as u16);
+    pub fn push_mcast_to_ucast(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 28u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_vlan_tunnel(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 29u16, 0 as u16);
+    pub fn push_vlan_tunnel(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 29u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_bcast_flood(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 30u16, 0 as u16);
+    pub fn push_bcast_flood(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 30u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
     pub fn push_group_fwd_mask(mut self, value: u16) -> Self {
@@ -21289,12 +21388,14 @@ impl<Prev: Pusher> PushLinkinfoBrportAttrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_neigh_suppress(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 32u16, 0 as u16);
+    pub fn push_neigh_suppress(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 32u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_isolated(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 33u16, 0 as u16);
+    pub fn push_isolated(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 33u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
     pub fn push_backup_port(mut self, value: u32) -> Self {
@@ -21302,12 +21403,14 @@ impl<Prev: Pusher> PushLinkinfoBrportAttrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_mrp_ring_open(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 35u16, 0 as u16);
+    pub fn push_mrp_ring_open(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 35u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_mrp_in_open(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 36u16, 0 as u16);
+    pub fn push_mrp_in_open(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 36u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
     pub fn push_mcast_eht_hosts_limit(mut self, value: u32) -> Self {
@@ -21320,12 +21423,14 @@ impl<Prev: Pusher> PushLinkinfoBrportAttrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_locked(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 39u16, 0 as u16);
+    pub fn push_locked(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 39u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_mab(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 40u16, 0 as u16);
+    pub fn push_mab(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 40u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
     pub fn push_mcast_n_groups(mut self, value: u32) -> Self {
@@ -21338,8 +21443,9 @@ impl<Prev: Pusher> PushLinkinfoBrportAttrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_neigh_vlan_suppress(mut self, value: ()) -> Self {
-        push_header(self.as_vec_mut(), 43u16, 0 as u16);
+    pub fn push_neigh_vlan_suppress(mut self, value: u8) -> Self {
+        push_header(self.as_vec_mut(), 43u16, 1 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
     pub fn push_backup_nhid(mut self, value: u32) -> Self {
