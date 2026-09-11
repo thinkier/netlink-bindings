@@ -115,6 +115,7 @@ pub fn gen_iterable_attrs(
                         , #selector_var: None
                     };
                     selectors_save = quote! {
+                        #selectors_save
                         if let #type_name::#selector_name(sel) = &res {
                             self.#selector_var = Some(#sel_cast);
                         }
