@@ -27,7 +27,7 @@ fast and supporting all properties of all sensible Netlink families.
 
 ## Support status
 
-All [upstream specifications][list-of-specs] are supported as of Linux 7.2.
+All [upstream specifications][list-of-specs] are supported as of Linux 7.3.
 
 - ✅ supported, has tests:
 [conntrack](./netlink-socket/examples/conntrack.rs),
