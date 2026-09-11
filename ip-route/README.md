@@ -65,7 +65,7 @@ ip!(sock, "ip link set dev {ifname} mtu {set_mtu:option} [?enable: up :][: down 
 
 ```toml
 [dependencies]
-ip-route = { git = "https://github.com/one-d-wide/netlink-bindings.git" }
+ip-route = "0.3"
 ```
 
 ## Compatibility
@@ -101,16 +101,113 @@ handles that are unique across all chains). Luckily, it seems to have only a
 handful of such features, so it doesn't seem too hard to implement as a helper
 function if need be.
 
+## Inner workings
+
+_You may stop reading here if you're only interested in the using already
+supported commands through the macro._
+
+`ip!()` macro transforms your command into code that uses netlink-bindings to
+encode the message.
+
+Internally, the commands is parsed according to a regex-like descriptions, that
+also contains variable substations and code blocks helping to shape the final
+message. Command descriptions reside in [`./syntax/ip*.rs`](./syntax).
+
+A bit simplifying, `ip!()` macro expansion looks like this:
+
+```rust
+use ip_route::ip;
+use netlink_bindings::{rt_link, traits::NetlinkRequest};
+
+let dev = "wg0";
+
+let req = ip!("ip link add dev {dev} up");
+
+let req_expanded = {
+    // ip link add
+    let mut header = rt_link::Ifinfomsg::new();
+    let mut req = rt_link::Request::new()
+        .set_create().set_excl()
+        .op_newlink_do(&header);
+    let mut attrs = req.encode();
+
+    // dev {dev}
+    {
+        let ifname: &str = dev; 
+        attrs = attrs.push_ifname_bytes(ifname.as_bytes());
+    }
+
+    // up
+    {
+        header.ifi_flags |= libc::IFF_UP as u32;
+        header.ifi_change |= libc::IFF_UP as u32;
+    }
+
+    // ...
+
+    std::mem::drop(attrs);
+    *req.header_mut() = header;
+    req
+};
+
+assert_eq!(req.protocol(), req_expanded.protocol());
+assert_eq!(req.flags(), req_expanded.flags());
+assert_eq!(req.payload(), req_expanded.payload());
+```
+
+The description of the command above might look like this:
+
+```rust
+use ip_route_syntax::{Map, Val, group};
+
+const EXAMPLE: Map = Map::Any(&[
+    // dev {ifname}
+    Map::All(&[
+        Map::Lit("dev"),
+        Map::Val(Val::new("ifname", "&str")),
+        Map::Code(stringify!{
+            attrs = attrs.push_ifname_bytes(ifname.as_bytes());
+        }),
+    ]),
+    // up
+    Map::All(&[
+        Map::Lit("up"),
+        Map::Code(stringify!{
+            header.ifi_flags |= libc::IFF_UP as u32;
+            header.ifi_change |= libc::IFF_UP as u32;
+        }),
+    ]),
+    // ...
+])
+.star();
+
+// or written more succinctly using a special macro...
+group! {
+    const EXAMPLE_MACRO;
+    ~ repeat: star,
+    "dev", ifname: &str => {
+        attrs = attrs.push_ifname_bytes(ifname.as_bytes());
+    }
+    "up" => {
+        header.ifi_flags |= libc::IFF_UP as u32;
+        header.ifi_change |= libc::IFF_UP as u32;
+    }
+    // ...
+}
+
+assert_eq!(Map::All(&[EXAMPLE]), EXAMPLE_MACRO);
+```
+
 ## Syntax
 
-Internally a command description is represented like a regular expression with
-a few notable additions:
+A command description is represented like a regular expression with a few
+notable additions:
 - `Val` represents a value to be made available to the following code. It
 matches either an inline constant or a substitution.
 - `Code` represents a code block. It's inserted when this node is traversed, it
 doesn't match anything itself.
 
-This simple [syntax] proved to be sufficient to represent the currently
+This simple [syntax] proved to be sufficient to parse all the currently
 implemented commands.
 
 [syntax]: ./syntax/lib.rs
@@ -138,8 +235,8 @@ pub struct Val {
 }
 ```
 
-For convenience, there's also a few macros that take care of common patterns,
-like weirdly crafted CLI options from iptables:
+For convenience, there's also a macro that simplifies common patterns, like
+weirdly crafted CLI options found in iptables:
 
 ```rust
 use ip_route_syntax::group;
@@ -172,10 +269,13 @@ group! {
 
 ## Interpreter
 
-It's possible to use the same description to interpret commands at runtime
-without recompiling the program. See [`interp_poc.rs`](./syntax/interp-poc.rs)
-as a proof of concept. Although it doesn't seem particularly useful when the
-proc-macro is available. And it's unclear how to parse the replies if any.
+For someone looking to make a new CLI tool for a netlink subsystem, ip-route
+could offer a succinct, but versatile way of describing the parameters and
+their actions, making the same command syntax available as both CLI and API.
+
+It's possible to use the same description to interpret commands at runtime. See
+[`interp_poc.rs`](./syntax/interp-poc.rs) as a proof of concept. But it's
+unclear how to parse the replies in a generic manner if any.
 
 ```rust,ignore
 // A potential API for an interpreter
@@ -193,10 +293,15 @@ ip_interp_cli(&["ip" "link" "set" "dev", ifname, "up"])
     .recv_ack()?;
 ```
 
-The idea behind it is to have a node hierarchy that plays nicely with the usual
-Rust's scoping rules, i.e. the syntax description to be an acyclic tree of
-nodes. Then visited branches can be encoded as a sequence of unique indexes,
-capturing the order they're traversed.
+The idea behind it is to have hierarchy of nodes that maps nicely onto the
+usual Rust's scoping rules, i.e. the syntax description to be an acyclic graph,
+aka a tree. The very same idea also makes it possible to conditionally toggle
+parameters by passing an `Option` in place of any value.
+
+Assigning each `Map` in a tree a unique index, it's possible to capture order
+they're visited when parsing a particular command. For example, using the
+following description to parse `ip route add 1.2.3.4 dev {ifname}` would give
+sequence `[1, 2, 1, 3]`.
 
 ```rust,ignore
 Map::Repeat(
@@ -217,13 +322,12 @@ Map::Repeat(
 )
 ```
 
-An encoding code are assembled recursively like this: `Map::All` appends code
-in sequence, `Map::Any` creates a `match` block with mutually exclusive
-branches, and repetitions produce loops.
+The obtained sequence can be passed to a runtime encoder that is assembled
+recursively like this: `Map::All` collects code blocks in sequence, `Map::Any`
+creates a `match` statement, and repetitions produce loops.
 
-For example, using a description above to parse `ip route add 1.2.3.4 dev
-{ifname}` would produce sequence `[1, 2, 1, 3]`. Executing the code snippet
-bellow against it would accomplish the same as a baked-in proc-macro.
+Executing the following code snippet against the obtained sequence would
+accomplish the same as code resulting from the proc-macro.
 
 ```rust,ignore
 let mut attrs = ...;
