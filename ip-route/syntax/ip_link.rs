@@ -106,6 +106,9 @@ group! {
             header.ifi_index = ::ip_route::utils::get_ifindex_str(ifname) as i32;
         }
     }
+    "dev-index", ifindex: u32 => {
+        header.ifi_index = ifindex as i32;
+    }
     "group", group_id: u32 => {
         attrs = attrs.push_group(group_id);
     }
@@ -275,7 +278,7 @@ group! {
 
 group! {
     const LINK_FILTER;
-    "index", val: u32 => {
+    ("dev-index" | "index"), val: u32 => {
         header.ifi_index = val as i32;
     }
     "dev", ifname: &str => {

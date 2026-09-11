@@ -121,7 +121,7 @@ group! {
     "dev", ifname: &str => {
         header.ifa_index = ::ip_route::utils::get_ifindex_str(ifname);
     }
-    "dev-ifindex", ifindex: u32 => {
+    ("dev-index" | "dev-ifindex"), ifindex: u32 => {
         header.ifa_index = ifindex;
     }
 }

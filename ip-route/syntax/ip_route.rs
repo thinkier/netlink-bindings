@@ -1,5 +1,5 @@
 use super::{command, group};
-use crate::{ANY, Map};
+use crate::{ANY, Map, lit};
 use quote::quote;
 
 command! {
@@ -423,7 +423,7 @@ group! {
     "ttl-propagate", "disabled" => {
         attrs = attrs.push_ttl_propagate(0);
     }
-    "default" => {
+    [lit("to").may()], "default" => {
         header.rtm_dst_len = 0;
         match header.rtm_family as i32 {
             libc::AF_INET => attrs = attrs.push_dst(Ipv4Addr::UNSPECIFIED.into()),
@@ -431,7 +431,7 @@ group! {
             _ => {},
         };
     }
-    prefix: IpNet => {
+    [lit("to").may()], prefix: IpNet => {
         header.rtm_family = addr_family(&prefix.addr());
         header.rtm_dst_len = prefix.prefix_len();
         attrs = attrs.push_dst(prefix.addr());

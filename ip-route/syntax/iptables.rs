@@ -145,7 +145,7 @@ command! {
     filter_map |desc, tok| => {
         let header = get_header(desc);
         quote! {
-            let header = #header;
+            let mut header = #header;
             let mut buf = Vec::new();
             let mut attrs = nftables::PushRuleAttrs::new(&mut buf);
             #tok
@@ -158,7 +158,7 @@ command! {
     filter_map |desc, tok| => {
         let header = get_header(desc);
         quote! {
-            let header = #header;
+            let mut header = #header;
             let mut buf = Vec::new();
             let mut attrs = nftables::PushRuleAttrs::new(&mut buf);
             #tok
@@ -171,7 +171,7 @@ command! {
     filter_map |desc, tok| => {
         let header = get_header(desc);
         quote! {
-            let header = #header;
+            let mut header = #header;
             let mut buf = Vec::new();
             let mut attrs = nftables::PushRuleAttrs::new(&mut buf);
             #tok
@@ -184,7 +184,7 @@ command! {
     filter_map |desc, tok| => {
         let header = get_header(desc);
         quote! {
-            let header = #header;
+            let mut header = #header;
             let mut buf = Vec::new();
             let mut attrs = nftables::PushRuleAttrs::new(&mut buf);
             #tok
@@ -197,7 +197,7 @@ command! {
     filter_map |desc, tok| => {
         let header = get_header(desc);
         quote! {
-            let header = #header;
+            let mut header = #header;
             let mut buf = Vec::new();
             let mut attrs = nftables::PushRuleAttrs::new(&mut buf);
             #tok
@@ -210,7 +210,7 @@ command! {
     filter_map |desc, tok| => {
         let header = get_header(desc);
         quote! {
-            let header = #header;
+            let mut header = #header;
             let mut buf = Vec::new();
             let mut attrs = nftables::PushChainAttrs::new(&mut buf);
             #tok
