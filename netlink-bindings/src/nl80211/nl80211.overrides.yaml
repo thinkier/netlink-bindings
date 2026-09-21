@@ -2,6 +2,23 @@ operations:
   fallback-attrs: nl80211-attrs
   transparent: true
 definitions:
+  - name: chan-width
+    type: enum
+    entries:
+      - "20-noht"
+      - "20"
+      - "40"
+      - "80"
+      - "80p80"
+      - "160"
+      - "5"
+      - "10"
+      - "1"
+      - "2"
+      - "4"
+      - "8"
+      - "16"
+      - "320"
   - name: iftype
     type: enum
     entries:
@@ -44,6 +61,8 @@ definitions:
 attribute-sets:
   - name: nl80211-attrs
     attributes:
+      - name: channel-width
+        enum: chan-width
       - name: iftype
         enum: iftype
       - name: sta-info

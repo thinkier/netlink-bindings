@@ -447,6 +447,45 @@ impl ProtocolFeatures {
 }
 #[doc = "Enum - defines an integer enumeration, with values for each entry incrementing by 1, (e.g. 0, 1, 2, 3)"]
 #[derive(Debug, Clone, Copy)]
+pub enum ChanWidth {
+    _20Noht = 0,
+    _20 = 1,
+    _40 = 2,
+    _80 = 3,
+    _80p80 = 4,
+    _160 = 5,
+    _5 = 6,
+    _10 = 7,
+    _1 = 8,
+    _2 = 9,
+    _4 = 10,
+    _8 = 11,
+    _16 = 12,
+    _320 = 13,
+}
+impl ChanWidth {
+    pub fn from_value(value: u64) -> Option<Self> {
+        Some(match value {
+            0 => Self::_20Noht,
+            1 => Self::_20,
+            2 => Self::_40,
+            3 => Self::_80,
+            4 => Self::_80p80,
+            5 => Self::_160,
+            6 => Self::_5,
+            7 => Self::_10,
+            8 => Self::_1,
+            9 => Self::_2,
+            10 => Self::_4,
+            11 => Self::_8,
+            12 => Self::_16,
+            13 => Self::_320,
+            _ => return None,
+        })
+    }
+}
+#[doc = "Enum - defines an integer enumeration, with values for each entry incrementing by 1, (e.g. 0, 1, 2, 3)"]
+#[derive(Debug, Clone, Copy)]
 pub enum Iftype {
     Unspecified = 0,
     Adhoc = 1,
@@ -765,6 +804,7 @@ pub enum Nl80211Attrs<'a> {
     AuthData(&'a [u8]),
     VhtCapability(&'a [u8]),
     ScanFlags(u32),
+    #[doc = "Associated type: [`ChanWidth`] (enum)"]
     ChannelWidth(u32),
     CenterFreq1(u32),
     CenterFreq2(u32),
@@ -3325,6 +3365,7 @@ impl<'a> IterableNl80211Attrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
+    #[doc = "Associated type: [`ChanWidth`] (enum)"]
     pub fn get_channel_width(&self) -> Result<u32, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
@@ -8123,7 +8164,10 @@ impl<'a> std::fmt::Debug for IterableNl80211Attrs<'_> {
                 Nl80211Attrs::AuthData(val) => fmt.field("AuthData", &FormatHexdump(val)),
                 Nl80211Attrs::VhtCapability(val) => fmt.field("VhtCapability", &FormatHexdump(val)),
                 Nl80211Attrs::ScanFlags(val) => fmt.field("ScanFlags", &val),
-                Nl80211Attrs::ChannelWidth(val) => fmt.field("ChannelWidth", &val),
+                Nl80211Attrs::ChannelWidth(val) => fmt.field(
+                    "ChannelWidth",
+                    &FormatEnum(val.into(), ChanWidth::from_value),
+                ),
                 Nl80211Attrs::CenterFreq1(val) => fmt.field("CenterFreq1", &val),
                 Nl80211Attrs::CenterFreq2(val) => fmt.field("CenterFreq2", &val),
                 Nl80211Attrs::P2pCtwindow(val) => fmt.field("P2pCtwindow", &val),
@@ -19133,6 +19177,7 @@ impl<Prev: Pusher> PushNl80211Attrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
+    #[doc = "Associated type: [`ChanWidth`] (enum)"]
     pub fn push_channel_width(mut self, value: u32) -> Self {
         push_header(self.as_vec_mut(), 159u16, 4 as u16);
         self.as_vec_mut().extend(value.to_ne_bytes());
