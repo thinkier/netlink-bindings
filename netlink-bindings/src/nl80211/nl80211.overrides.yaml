@@ -65,6 +65,10 @@ attribute-sets:
         enum: chan-width
       - name: iftype
         enum: iftype
+      - name: sta-flags
+        type: u32
+        enum: sta-flag
+        enum-as-flags: true
       - name: sta-info
         type: nest
         nested-attributes: sta-info

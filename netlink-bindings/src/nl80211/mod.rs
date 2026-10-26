@@ -659,7 +659,8 @@ pub enum Nl80211Attrs<'a> {
     BeaconHead(&'a [u8]),
     BeaconTail(&'a [u8]),
     StaAid(u16),
-    StaFlags(&'a [u8]),
+    #[doc = "Associated type: [`StaFlag`] (1 bit per enumeration)"]
+    StaFlags(u32),
     StaListenInterval(u16),
     StaSupportedRates(&'a [u8]),
     StaVlan(u32),
@@ -1224,7 +1225,8 @@ impl<'a> IterableNl80211Attrs<'a> {
             self.buf.as_ptr() as usize,
         ))
     }
-    pub fn get_sta_flags(&self) -> Result<&'a [u8], ErrorContext> {
+    #[doc = "Associated type: [`StaFlag`] (1 bit per enumeration)"]
+    pub fn get_sta_flags(&self) -> Result<u32, ErrorContext> {
         let mut iter = self.clone();
         iter.pos = 0;
         for attr in iter {
@@ -6536,7 +6538,7 @@ impl<'a> Iterator for IterableNl80211Attrs<'a> {
                     val
                 }),
                 17u16 => Nl80211Attrs::StaFlags({
-                    let res = Some(next);
+                    let res = parse_u32(next);
                     let Some(val) = res else { break };
                     val
                 }),
@@ -7989,7 +7991,12 @@ impl<'a> std::fmt::Debug for IterableNl80211Attrs<'_> {
                 Nl80211Attrs::BeaconHead(val) => fmt.field("BeaconHead", &FormatHexdump(val)),
                 Nl80211Attrs::BeaconTail(val) => fmt.field("BeaconTail", &FormatHexdump(val)),
                 Nl80211Attrs::StaAid(val) => fmt.field("StaAid", &val),
-                Nl80211Attrs::StaFlags(val) => fmt.field("StaFlags", &FormatHexdump(val)),
+                Nl80211Attrs::StaFlags(val) => fmt.field(
+                    "StaFlags",
+                    &FormatFlags(val.into(), |val| {
+                        StaFlag::from_value(val.trailing_zeros().into())
+                    }),
+                ),
                 Nl80211Attrs::StaListenInterval(val) => fmt.field("StaListenInterval", &val),
                 Nl80211Attrs::StaSupportedRates(val) => {
                     fmt.field("StaSupportedRates", &FormatHexdump(val))
@@ -18464,9 +18471,10 @@ impl<Prev: Pusher> PushNl80211Attrs<Prev> {
         self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
-    pub fn push_sta_flags(mut self, value: &[u8]) -> Self {
-        push_header(self.as_vec_mut(), 17u16, value.len() as u16);
-        self.as_vec_mut().extend(value);
+    #[doc = "Associated type: [`StaFlag`] (1 bit per enumeration)"]
+    pub fn push_sta_flags(mut self, value: u32) -> Self {
+        push_header(self.as_vec_mut(), 17u16, 4 as u16);
+        self.as_vec_mut().extend(value.to_ne_bytes());
         self
     }
     pub fn push_sta_listen_interval(mut self, value: u16) -> Self {
