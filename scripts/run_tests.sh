@@ -2,6 +2,8 @@
 set -euo pipefail
 
 if test -z "${UNSHARE:-}"; then
+  cargo fetch
+
   export UNSHARE=1
   exec unshare --user --net --keep-caps -- bash -c "$0" -- "$@"
 fi
@@ -18,7 +20,9 @@ features="
   nl80211,
   tc,
   inet-diag,
-  netdev
+  netdev,
+  rt-nsid,
+  drbd2
 "
 
 examples="
@@ -35,6 +39,7 @@ examples="
   multicast-simple
   multicast-generic
   multicast-rtnetlink
+  netns-id
 "
 
 examples_async="

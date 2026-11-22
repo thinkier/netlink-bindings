@@ -140,6 +140,8 @@ command! {
                     .end_nested();
             };
         }
+
+        let mut chained = nftables::Chained::new(rand::random());
     }
     "iptables/ip6tables -L/--list": [FLAGS, MAY_TABLE, CHAIN.may()],
     filter_map |desc, tok| => {
@@ -164,7 +166,8 @@ command! {
             #tok
             let mut req = nftables::Request::new().set_create().op_newrule_do(&header);
             req.encode().as_vec_mut().extend_from_slice(attrs.as_vec());
-            req
+            chained.with_request(&req);
+            chained.finalize()
         }
     },
     "iptables/ip6tables -D/--delete": [FLAGS, MAY_TABLE, CHAIN, RULE_NUM],
@@ -177,7 +180,8 @@ command! {
             #tok
             let mut req = nftables::Request::new().op_delrule_do(&header);
             req.encode().as_vec_mut().extend_from_slice(attrs.as_vec());
-            req
+            chained.with_request(&req);
+            chained.finalize()
         }
     },
     "iptables/ip6tables -R/--replace": [FLAGS, MAY_TABLE, CHAIN, RULE_NUM, RULE_SPEC]:
@@ -203,7 +207,8 @@ command! {
             #tok
             let mut req = nftables::Request::new().op_delrule_do(&header);
             req.encode().as_vec_mut().extend_from_slice(attrs.as_vec());
-            req
+            chained.with_request(&req);
+            chained.finalize()
         }
     },
     "iptables/ip6tables -N/--new": [FLAGS, MAY_TABLE, CHAIN_NAME]:
@@ -216,7 +221,8 @@ command! {
             #tok
             let mut req = nftables::Request::new().set_excl().op_newchain_do(&header);
             req.encode().as_vec_mut().extend_from_slice(attrs.as_vec());
-            req
+            chained.with_request(&req);
+            chained.finalize()
         }
     },
     "iptables/ip6tables -D/--delete": [FLAGS, MAY_TABLE, CHAIN_NAME]:
@@ -229,7 +235,8 @@ command! {
             #tok
             let mut req = nftables::Request::new().op_delchain_do(&header);
             req.encode().as_vec_mut().extend_from_slice(attrs.as_vec());
-            req
+            chained.with_request(&req);
+            chained.finalize()
         }
     },
     "iptables/ip6tables -E/--rename": [ANY.star()]: |_tok| => {
@@ -251,7 +258,15 @@ group! {
     const MAY_TABLE;
     ~ repeat: may,
     ~ init => { let mut table = "filter"; }
-    ~ fini => { attrs = attrs.push_table_bytes(table.as_bytes()); }
+    ~ fini => {
+        attrs = attrs.push_table_bytes(table.as_bytes());
+
+        chained.request()
+            .set_create()
+            .op_newtable_do(&header)
+            .encode()
+            .push_name_bytes(table.as_bytes());
+    }
     "-t", name: &str => { table = name; }
 }
 
@@ -278,6 +293,13 @@ group! {
     const CHAIN;
     chain: &str => {
         attrs = attrs.push_chain_bytes(chain.as_bytes());
+
+        chained.request()
+            .set_create()
+            .op_newchain_do(&header)
+            .encode()
+            .push_table_bytes(table.as_bytes())
+            .push_name_bytes(chain.as_bytes());
     }
 }
 

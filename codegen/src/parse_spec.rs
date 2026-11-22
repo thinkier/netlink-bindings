@@ -28,6 +28,9 @@ impl ByteOrder {
     pub fn is_host(&self) -> bool {
         matches!(self, Self::Host)
     }
+    pub fn is_big(&self) -> bool {
+        matches!(self, Self::Big)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -235,6 +238,7 @@ pub enum NumOrName {
 }
 
 impl NumOrName {
+    #[allow(unused)]
     pub fn get_value(&self) -> usize {
         match self {
             Self::Num(val) => *val,
@@ -310,6 +314,10 @@ pub struct AttrProp {
     /// supported hints are hex, mac, fddi, ipv4, ipv6 and uuid.
     pub display_hint: Option<String>,
     pub doc: Option<String>,
+    /// Starting index for indexed-array. Defaults to 0, but some kernel
+    /// consumers index the array 1-based and silently ignore entries below
+    /// their start index.
+    pub array_index_start: Option<u16>,
 }
 
 impl AttrProp {
@@ -335,10 +343,6 @@ impl AttrProp {
     pub fn is_ipv6(&self) -> bool {
         matches!(self.r#type, AttrType::Binary { r#struct: None, .. })
             && self.display_hint.as_ref().is_some_and(|h| h == "ipv6")
-            && self
-                .checks
-                .as_ref()
-                .is_some_and(|c| c.min_len.as_ref().is_some_and(|l| l.get_value() == 16))
     }
 
     pub fn is_ip(&self) -> bool {
@@ -346,7 +350,7 @@ impl AttrProp {
             && self
                 .display_hint
                 .as_ref()
-                .is_some_and(|h| matches!(h.as_ref(), "ipv4" | "ipv4-or-v6"))
+                .is_some_and(|h| matches!(h.as_ref(), "ipv4" | "ipv6" | "ipv4-or-v6"))
     }
 
     pub fn is_sockaddr(&self) -> bool {

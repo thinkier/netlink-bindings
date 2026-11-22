@@ -1,8 +1,13 @@
-use std::{io, mem::MaybeUninit, os::fd::AsRawFd, sync::Arc};
+use std::{
+    io,
+    mem::MaybeUninit,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd},
+    sync::Arc,
+};
 
 use netlink_bindings::utils;
 
-use super::{sock::NetlinkReplyInner, NetlinkSocket, Socket};
+use super::{reply::NetlinkReplyInner, NetlinkSocket, Socket};
 #[allow(unused_imports)]
 use super::{Read, Write};
 use crate::{ReplyError, RECV_BUF_SIZE};
@@ -14,10 +19,77 @@ pub struct MulticastRecv {
 }
 
 pub struct MulticastSocketRaw {
-    buf: Arc<[u8; RECV_BUF_SIZE]>,
+    buf: Option<Arc<[u8; RECV_BUF_SIZE]>>,
     sock: Socket,
     reply: NetlinkReplyInner,
     last_group: Option<u32>,
+}
+
+impl AsFd for MulticastSocketRaw {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.as_sock().as_fd()
+    }
+}
+
+impl AsRawFd for MulticastSocketRaw {
+    fn as_raw_fd(&self) -> RawFd {
+        self.as_sock().as_raw_fd()
+    }
+}
+
+#[super::only_sync]
+impl MulticastSocketRaw {
+    pub fn into_fd(self) -> io::Result<OwnedFd> {
+        Ok(self.into_sock().into())
+    }
+
+    pub fn from_fd(fd: OwnedFd) -> io::Result<Self> {
+        Self::from_sock(Socket::from(fd))
+    }
+}
+
+#[super::only_tokio]
+impl MulticastSocketRaw {
+    pub fn into_fd(self) -> io::Result<OwnedFd> {
+        Ok(self.into_sock().into_std()?.into())
+    }
+
+    pub fn from_fd(fd: OwnedFd) -> io::Result<Self> {
+        Self::from_sock(Socket::from_std(fd.into())?)
+    }
+}
+
+#[super::only_smol]
+impl MulticastSocketRaw {
+    pub fn into_fd(self) -> io::Result<OwnedFd> {
+        Ok(self.into_sock().into_inner()?.into())
+    }
+
+    pub fn from_fd(fd: OwnedFd) -> io::Result<Self> {
+        Self::from_sock(Socket::new(fd.into())?)
+    }
+}
+
+impl MulticastSocketRaw {
+    fn as_sock(&self) -> &Socket {
+        &self.sock
+    }
+
+    fn into_sock(self) -> Socket {
+        self.sock
+    }
+
+    fn from_sock(sock: Socket) -> io::Result<Self> {
+        Ok(Self {
+            buf: None,
+            sock,
+            reply: NetlinkReplyInner {
+                buf_offset: 0,
+                buf_read: 0,
+            },
+            last_group: None,
+        })
+    }
 }
 
 struct WrapSendUnsafe<T>(T);
@@ -58,15 +130,7 @@ impl MulticastSocketRaw {
             return Err(io::Error::last_os_error());
         }
 
-        Ok(Self {
-            buf: Arc::new([0u8; RECV_BUF_SIZE]),
-            sock,
-            reply: NetlinkReplyInner {
-                buf_offset: 0,
-                buf_read: 0,
-            },
-            last_group: None,
-        })
+        Self::from_sock(sock)
     }
 
     pub fn listen(&mut self, group_id: u32) -> io::Result<()> {
@@ -88,7 +152,10 @@ impl MulticastSocketRaw {
 
     #[super::strip_async]
     pub async fn recv(&mut self) -> Result<(MulticastRecv, &[u8]), ReplyError> {
-        let buf = Arc::make_mut(&mut self.buf);
+        let buf = Arc::make_mut(
+            self.buf
+                .get_or_insert_with(|| Arc::new([0u8; RECV_BUF_SIZE])),
+        );
 
         loop {
             if self.reply.buf_offset == self.reply.buf_read {
@@ -118,7 +185,7 @@ impl MulticastSocketRaw {
                                     multicast_group,
                                     message_type,
                                 },
-                                &self.buf[l..r],
+                                &self.buf.as_ref().unwrap()[l..r],
                             ));
                         }
                         Err(mut err) => {
@@ -128,7 +195,7 @@ impl MulticastSocketRaw {
 
                             if err.has_context() {
                                 // err.lookup = Request::lookup;
-                                err.reply_buf = Some(self.buf.clone());
+                                err.reply_buf = Some(self.buf.as_ref().unwrap().clone());
                             }
 
                             return Err(err);

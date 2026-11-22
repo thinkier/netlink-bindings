@@ -1,26 +1,12 @@
 mod testbed;
 use ::ip_route_proc_macro::{ip, ip_dump};
-use ip_route::utils;
-use netlink_bindings::nftables;
 use netlink_socket2::NetlinkSocket;
 use std::{io::ErrorKind, sync::LazyLock};
 
 static SETUP: LazyLock<()> = LazyLock::new(|| {
     testbed::setup();
+
     let mut sock = NetlinkSocket::new();
-
-    for fam in [libc::AF_INET, libc::AF_INET6] {
-        // Table "filter" may not exist...
-        let mut req = nftables::Request::new()
-            .set_create()
-            .op_newtable_do(&nftables::Nfgenmsg {
-                nfgen_family: fam as u8,
-                ..Default::default()
-            });
-        req.encode().push_name_bytes(b"filter");
-        utils::iptables_request(&mut sock, &req).unwrap();
-    }
-
     match ip!(sock, "iptables -N test") {
         Err(err) if err.as_io_error().kind() == ErrorKind::AlreadyExists => {}
         res => res.unwrap(),
@@ -66,7 +52,7 @@ macro_rules! test_mod {
         let ctx = testbed::trace_start();
         let req = ip!($str $(, $args )* );
         let mut sock = NetlinkSocket::new();
-        ip_route::utils::iptables_request(&mut sock, &req).unwrap();
+        ip_route::utils::iptables_request_chained(&mut sock, &req).unwrap();
         let r = testbed::trace_stop(ctx);
 
         testbed::compare_recurse_slice(&l, &r);

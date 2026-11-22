@@ -3,9 +3,11 @@ conntrack
 dev-energymodel
 devlink
 dpll
+drbd2
 drm-ras
 ethtool
 fou
+gtp
 handshake
 inet-diag
 lockd
@@ -25,6 +27,8 @@ psp
 rt-addr
 rt-link
 rt-neigh
+rt-nexthop
+rt-nsid
 rt-route
 rt-rule
 sunrpc

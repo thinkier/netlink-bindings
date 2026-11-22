@@ -7,21 +7,24 @@ use std::{
 };
 
 #[allow(unused_imports)]
-use super::{Read, Socket, Write};
+use super::{
+    chained::NetlinkReplyChained, reply::NetlinkReplyInner, NetlinkReply, Read, Socket, Write,
+};
 use crate::{ReplyError, RECV_BUF_SIZE};
 
 use netlink_bindings::{
     builtin::Nlmsghdr,
     nlctrl,
-    traits::{NetlinkRequest, Protocol},
-    utils,
+    traits::{NetlinkChained, NetlinkRequest, Protocol},
 };
 
 pub struct NetlinkSocket {
-    pub(crate) buf: Arc<[u8; RECV_BUF_SIZE]>,
+    pub(crate) buf: Option<Arc<[u8; RECV_BUF_SIZE]>>,
     pub(crate) cache: HashMap<&'static [u8], u16>,
     pub(crate) sock: HashMap<u16, Socket>,
     pub(crate) seq: u32,
+    /// Protonum of NetlinkSocketRaw. If set, it is the only socket created.
+    pub(crate) protonum: Option<u16>,
 }
 
 impl Default for NetlinkSocket {
@@ -33,17 +36,28 @@ impl Default for NetlinkSocket {
 impl NetlinkSocket {
     pub fn new() -> Self {
         Self {
-            buf: Arc::new([0u8; RECV_BUF_SIZE]),
-            cache: HashMap::default(),
+            buf: None,
+            cache: HashMap::new(),
             sock: HashMap::new(),
             seq: 1,
+            protonum: None,
         }
     }
 
-    pub(crate) fn get_socket_cached(
-        cache: &mut HashMap<u16, Socket>,
+    pub(crate) fn get_socket_cached<'a>(
+        cache: &'a mut HashMap<u16, Socket>,
+        sock_protonum: &Option<u16>,
         protonum: u16,
-    ) -> io::Result<&mut Socket> {
+    ) -> io::Result<&'a mut Socket> {
+        if let Some(sock_protonum) = sock_protonum {
+            if *sock_protonum != protonum {
+                return Err(io::Error::other(format!(
+                    "Can't send a request. Requested protonum is {protonum}, while NetlinkSocketRaw protonum is {sock_protonum}",
+                ))
+                .into());
+            }
+        }
+
         match cache.entry(protonum) {
             Entry::Occupied(sock) => Ok(sock.into_mut()),
             Entry::Vacant(ent) => {
@@ -108,7 +122,7 @@ impl NetlinkSocket {
         request: &Request,
     ) -> io::Result<NetlinkReply<'sock, Request>>
     where
-        Request: NetlinkRequest,
+        Request: NetlinkRequest + ?Sized,
     {
         let (protonum, request_type) = match request.protocol() {
             Protocol::Raw {
@@ -119,6 +133,89 @@ impl NetlinkSocket {
         };
 
         self.request_raw(request, protonum, request_type).await
+    }
+
+    /// Same as `.request(&request)?.recv_ack()`
+    #[super::strip_async]
+    pub async fn request_ack<Request>(&mut self, request: &Request) -> Result<(), ReplyError>
+    where
+        Request: NetlinkRequest + ?Sized,
+    {
+        match self.request(request).await?.recv_inner().await {
+            None => Ok(()),
+            Some(Ok(_)) => Err(io::Error::other("Reply isn't just an ack").into()),
+            Some(Err(err)) => Err(err),
+        }
+    }
+
+    /// Same as `.request(&request)?.recv_one()`
+    #[super::strip_async]
+    pub async fn request_one<'sock, Request>(
+        &'sock mut self,
+        request: &Request,
+    ) -> Result<Request::ReplyType<'sock>, ReplyError>
+    where
+        Request: NetlinkRequest + ?Sized + 'sock,
+    {
+        match self.request(request).await?.recv_inner().await {
+            None => Err(io::Error::other("Reply didn't contain data").into()),
+            Some(Ok((l, r))) => Ok(Request::decode_reply(&self.buf.as_mut().unwrap()[l..r])),
+            Some(Err(err)) => Err(err),
+        }
+    }
+
+    /// Execute a chained request
+    ///
+    /// Some subsystems have special requirements for related requests,
+    /// expecting certain types of messages to be sent within a single write
+    /// operation. For example transactions in nftables subsystem.
+    ///
+    /// Chained requests currently don't support replies carrying data.
+    #[super::strip_async]
+    pub async fn request_chained<'a, Chained>(
+        &'a mut self,
+        request: &'a Chained,
+    ) -> io::Result<NetlinkReplyChained<'a>>
+    where
+        Chained: NetlinkChained + Send + Sync,
+    {
+        let sock = Self::get_socket_cached(&mut self.sock, &self.protonum, request.protonum())?;
+
+        Self::write_buf(sock, &[IoSlice::new(request.payload())]).await?;
+
+        let mut done = super::chained::Bits::with_len(request.chain_len());
+        for i in 0..request.chain_len() {
+            let Some(has_ack) = request.supports_ack(i) else {
+                break;
+            };
+            if !has_ack {
+                done.set(i);
+            }
+        }
+
+        Ok(NetlinkReplyChained {
+            sock,
+            buf: self
+                .buf
+                .get_or_insert_with(|| Arc::new([0u8; RECV_BUF_SIZE])),
+            request,
+            inner: NetlinkReplyInner {
+                buf_offset: 0,
+                buf_read: 0,
+            },
+            done,
+        })
+    }
+
+    #[super::strip_async]
+    pub async fn request_chained_all<Chained>(
+        &mut self,
+        request: &Chained,
+    ) -> Result<(), ReplyError>
+    where
+        Chained: NetlinkChained + Send + Sync,
+    {
+        self.request_chained(request).await?.recv_all().await
     }
 
     #[super::strip_async]
@@ -160,10 +257,10 @@ impl NetlinkSocket {
         request_type: u16,
     ) -> io::Result<NetlinkReply<'sock, Request>>
     where
-        Request: NetlinkRequest,
+        Request: NetlinkRequest + ?Sized,
     {
         let seq = self.reserve_seq(1);
-        let sock = Self::get_socket_cached(&mut self.sock, protonum)?;
+        let sock = Self::get_socket_cached(&mut self.sock, &self.protonum, protonum)?;
 
         let header = Nlmsghdr {
             len: Nlmsghdr::len() as u32 + request.payload().len() as u32,
@@ -184,12 +281,14 @@ impl NetlinkSocket {
 
         Ok(NetlinkReply {
             sock,
-            buf: &mut self.buf,
+            buf: self
+                .buf
+                .get_or_insert_with(|| Arc::new([0u8; RECV_BUF_SIZE])),
             inner: NetlinkReplyInner {
                 buf_offset: 0,
                 buf_read: 0,
             },
-            seq: header.seq,
+            seq,
             done: false,
             phantom: PhantomData,
         })
@@ -231,212 +330,6 @@ impl NetlinkSocket {
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(err) => return Err(err),
             }
-        }
-    }
-}
-
-pub(crate) struct NetlinkReplyInner {
-    pub(crate) buf_offset: usize,
-    pub(crate) buf_read: usize,
-}
-
-impl NetlinkReplyInner {
-    #[super::not_tokio]
-    #[super::strip_async]
-    async fn read_buf(sock: &mut Socket, buf: &mut [u8]) -> io::Result<usize> {
-        loop {
-            match sock.read(&mut buf[..]).await {
-                Ok(read) => return Ok(read),
-                Err(err) if err.kind() == ErrorKind::Interrupted => continue,
-                Err(err) => return Err(err),
-            }
-        }
-    }
-
-    #[super::only_tokio]
-    #[super::strip_async]
-    async fn read_buf(sock: &mut Socket, buf: &mut [u8]) -> io::Result<usize> {
-        loop {
-            // Some subsystems don't correctly implement io notifications, which tokio
-            // runtime expects to receive before doing any actual io, hence we instead
-            // always attempt an io operation first.
-            let res = sock.try_read(&mut buf[..]);
-            if matches!(&res, Err(err) if err.kind() == ErrorKind::WouldBlock) {
-                sock.readable().await?;
-                continue;
-            }
-
-            match res {
-                Ok(read) => return Ok(read),
-                Err(err) if err.kind() == ErrorKind::Interrupted => continue,
-                Err(err) => return Err(err),
-            }
-        }
-    }
-
-    #[allow(clippy::type_complexity)]
-    #[super::strip_async]
-    pub async fn recv(
-        &mut self,
-        sock: &mut Socket,
-        buf: &mut [u8; RECV_BUF_SIZE],
-    ) -> io::Result<(u32, u16, Result<(usize, usize), ReplyError>)> {
-        if self.buf_offset == self.buf_read {
-            self.buf_read = Self::read_buf(sock, &mut buf[..]).await?;
-            self.buf_offset = 0;
-        }
-        self.parse_next(buf).await
-    }
-
-    #[allow(clippy::type_complexity)]
-    #[super::strip_async]
-    pub(crate) async fn parse_next(
-        &mut self,
-        buf: &[u8; RECV_BUF_SIZE],
-    ) -> io::Result<(u32, u16, Result<(usize, usize), ReplyError>)> {
-        let packet = &buf[self.buf_offset..self.buf_read];
-
-        let too_short_err = || io::Error::other("Received packet is too short");
-
-        let Some(header) = packet.get(..Nlmsghdr::len()) else {
-            return Err(too_short_err());
-        };
-        let header = Nlmsghdr::from_slice(header);
-
-        let payload_start = self.buf_offset + Nlmsghdr::len();
-        self.buf_offset += header.len as usize;
-
-        match header.r#type as i32 {
-            libc::NLMSG_DONE | libc::NLMSG_ERROR => {
-                let Some(code) = packet.get(16..20) else {
-                    return Err(too_short_err());
-                };
-                let code = utils::parse_i32(code).unwrap();
-
-                let mut request_bounds = (0, 0);
-                if code != 0 && header.r#type & libc::NLMSG_ERROR as u16 != 0 {
-                    let Some(echo_header) = packet.get(20..(20 + Nlmsghdr::len())) else {
-                        return Err(too_short_err());
-                    };
-
-                    if header.flags & libc::NLM_F_CAPPED as u16 == 0 {
-                        let start = Nlmsghdr::from_slice(echo_header).len;
-                        if packet.len() < 20 + start as usize {
-                            return Err(too_short_err());
-                        }
-
-                        request_bounds.0 += 20 + Nlmsghdr::len() as u32;
-                        request_bounds.1 += 20 + start;
-                    } else {
-                        request_bounds.0 += 20 + Nlmsghdr::len() as u32;
-                        request_bounds.1 += 20 + Nlmsghdr::len() as u32;
-                    }
-                };
-
-                let mut ext_ack_bounds = (0, 0);
-                if header.flags & libc::NLM_F_ACK_TLVS as u16 != 0 {
-                    ext_ack_bounds = (
-                        utils::align_up(request_bounds.1 as usize, utils::NLA_ALIGNTO)
-                            .min(self.buf_offset) as u32,
-                        self.buf_offset as u32,
-                    );
-                }
-
-                Ok((
-                    header.seq,
-                    header.r#type,
-                    Err(ReplyError {
-                        code: io::Error::from_raw_os_error(-code),
-                        request_bounds,
-                        ext_ack_bounds,
-                        reply_buf: None,
-                        chained_name_pos: None,
-                        lookup: None,
-                    }),
-                ))
-            }
-            libc::NLMSG_NOOP => Ok((
-                header.seq,
-                header.r#type,
-                Err(io::Error::other("Received NLMSG_NOOP").into()),
-            )),
-            libc::NLMSG_OVERRUN => Ok((
-                header.seq,
-                header.r#type,
-                Err(io::Error::other("Received NLMSG_OVERRUN").into()),
-            )),
-            _ => Ok((
-                header.seq,
-                header.r#type,
-                Ok((payload_start, self.buf_offset)),
-            )),
-        }
-    }
-}
-
-#[must_use = "The request is sent, but not acknowledged. Consider .recv_ack(), .recv_one() or .recv()"]
-pub struct NetlinkReply<'sock, Request: NetlinkRequest> {
-    inner: NetlinkReplyInner,
-    sock: &'sock mut Socket,
-    buf: &'sock mut Arc<[u8; RECV_BUF_SIZE]>,
-    seq: u32,
-    done: bool,
-    phantom: PhantomData<Request>,
-}
-
-impl<Request: NetlinkRequest> NetlinkReply<'_, Request> {
-    #[super::strip_async]
-    pub async fn recv_one(&mut self) -> Result<Request::ReplyType<'_>, ReplyError> {
-        if let Some(res) = self.recv().await {
-            return res;
-        }
-        Err(io::Error::other("Reply didn't contain data").into())
-    }
-
-    #[super::strip_async]
-    pub async fn recv_ack(&mut self) -> Result<(), ReplyError> {
-        if let Some(res) = self.recv().await {
-            res?;
-            return Err(io::Error::other("Reply isn't just an ack").into());
-        }
-        Ok(())
-    }
-
-    #[super::strip_async]
-    pub async fn recv(&mut self) -> Option<Result<Request::ReplyType<'_>, ReplyError>> {
-        if self.done {
-            return None;
-        }
-
-        let buf = Arc::make_mut(self.buf);
-
-        loop {
-            match self.inner.recv(self.sock, buf).await {
-                Err(io_err) => {
-                    self.done = true;
-                    return Some(Err(io_err.into()));
-                }
-                Ok((seq, _type, res)) => {
-                    if seq != self.seq {
-                        continue;
-                    }
-                    return match res {
-                        Ok((l, r)) => Some(Ok(Request::decode_reply(&self.buf[l..r]))),
-                        Err(mut err) => {
-                            self.done = true;
-                            if err.code.raw_os_error().unwrap() == 0 {
-                                None
-                            } else {
-                                if err.has_context() {
-                                    err.lookup = Some(Request::lookup);
-                                    err.reply_buf = Some(self.buf.clone());
-                                }
-                                Some(Err(err))
-                            }
-                        }
-                    };
-                }
-            };
         }
     }
 }

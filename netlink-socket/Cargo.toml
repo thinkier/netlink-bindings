@@ -13,6 +13,10 @@ name = "wireguard-setup"
 required-features = [ "netlink-bindings/wireguard", "netlink-bindings/rt-link", "netlink-bindings/rt-addr" ]
 
 [[example]]
+name = "drbd2-status"
+required-features = [ "netlink-bindings/drbd2" ]
+
+[[example]]
 name = "conntrack"
 required-features = [ "netlink-bindings/conntrack" ]
 
@@ -63,6 +67,10 @@ required-features = [ "netlink-bindings/rt-link" ]
 [[example]]
 name = "multicast-simple-async"
 required-features = [ "netlink-bindings/netdev", "netlink-bindings/rt-link", "async" ]
+
+[[example]]
+name = "netns-id"
+required-features = [ "netlink-bindings/rt-nsid" ]
 
 [package.metadata.docs.rs]
 all-features = true

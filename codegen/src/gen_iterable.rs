@@ -4,8 +4,7 @@ use std::collections::HashSet;
 use syn::Ident;
 
 use crate::{
-    gen_attrs::GenAttrs,
-    gen_attrs::{gen_attr_type, gen_attr_type_name},
+    gen_attrs::{gen_attr_type, gen_attr_type_name, GenAttrs},
     gen_cstruct::struct_type,
     gen_ops::OpHeader,
     gen_sub_message::{self},
@@ -93,8 +92,8 @@ pub fn gen_iterable_attrs(
                 let sel_type;
                 let sel_cast;
                 match &selector_type {
-                    gen_sub_message::SelectorType::U32 { .. } => {
-                        sel_type = quote!(u32);
+                    gen_sub_message::SelectorType::Integer { rust_type, .. } => {
+                        sel_type = rust_type.clone();
                         sel_cast = quote!(*sel);
                     }
                     gen_sub_message::SelectorType::CStr => {
@@ -270,6 +269,12 @@ pub fn gen_iterable_parse(spec: &Spec, attr: &AttrProp) -> TokenStream {
     let rust_type = match &attr.r#type {
         AttrType::U8 => "u8",
         AttrType::U16 => "u16",
+        AttrType::U32 if attr.is_ipv4() && !attr.byte_order.is_big() => {
+            panic!(
+                "Attribute {:?} has display-hint: ipv4, but no byte-order: big-endian. Likely an error",
+                attr.name
+            );
+        }
         AttrType::U32 if attr.is_ipv4() => {
             let parse = format_ident!("parse{ord}_u32");
             return quote! { #parse(#buf_name).map(Ipv4Addr::from_bits) };
@@ -280,9 +285,10 @@ pub fn gen_iterable_parse(spec: &Spec, attr: &AttrProp) -> TokenStream {
         AttrType::S16 => "i16",
         AttrType::S32 => "i32",
         AttrType::S64 => "i64",
+        // IPv6 addresses are always in network byte order, regardless of
+        // `byte-order`, which most specs leave unset on binary attributes.
         AttrType::Binary { .. } if attr.is_ipv6() => {
-            let parse = format_ident!("parse{ord}_u128");
-            return quote! { #parse(#buf_name).map(Ipv6Addr::from_bits) };
+            return quote! { parse_ipv6(#buf_name) };
         }
         AttrType::Binary { .. } if attr.is_ip() => {
             let parse = format_ident!("parse_ip");
